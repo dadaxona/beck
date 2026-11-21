@@ -1,0 +1,23 @@
+{
+  "sqlite": {
+    "dialect": "sqlite",
+    "storage": "database/dev.sqlite",
+    "logging": false
+  },
+  "mysql": {
+    "username": "root",
+    "password": "",
+    "database": "onec",
+    "host": "127.0.0.1",
+    "dialect": "mysql",
+    "logging": false
+  },
+  "postgres": {
+    "username": "postgres",
+    "password": "",
+    "database": "onec",
+    "host": "127.0.0.1",
+    "dialect": "postgres",
+    "logging": false
+  }
+}
