@@ -116,6 +116,23 @@ const exact = {
   "Mijoz topilmadi": "Клиент не найден",
   "Ismni kiriting": "Введите имя",
   "Manzilni kiriting": "Введите адрес",
+
+  // Valyutalar va omborlar
+  "Valyuta kodini kiriting (masalan USD, EUR, RUB)": "Введите код валюты (например USD, EUR, RUB)",
+  "UZS asosiy valyuta: uni o'zgartirib bo'lmaydi": "UZS — основная валюта: её нельзя изменить",
+  "UZS asosiy valyuta: uni o'chirib bo'lmaydi": "UZS — основная валюта: её нельзя удалить",
+  "Kurs 0 dan katta bo'lishi kerak": "Курс должен быть больше 0",
+  "Kurs juda katta": "Слишком большой курс",
+  "Valyuta topilmadi": "Валюта не найдена",
+  "Ombor nomini kiriting": "Введите название склада",
+  "Bunday ombor mavjud": "Такой склад уже существует",
+  "Ombor topilmadi": "Склад не найден",
+  "Asosiy (standart) omborni o'chirib bo'lmaydi": "Основной склад (по умолчанию) нельзя удалить",
+  "Omborda tovar qoldig'i bor. Avval tovarlarni boshqa omborga ko'chiring": "На складе есть остатки. Сначала переместите товары на другой склад",
+  "Ombor hujjatlarda ishlatilgan, o'chirib bo'lmaydi": "Склад используется в документах, удалить нельзя",
+  "Omborlarni tanlang": "Выберите склады",
+  "Qayerdan va qayerga omborlari bir xil bo'lishi mumkin emas": "Склады «откуда» и «куда» не могут совпадать",
+  "Avval o'chirishga belgilang": "Сначала пометьте на удаление",
 };
 
 // O'zgaruvchan qismli xabarlar (tartib muhim: aniqrog'i avval)

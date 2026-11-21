@@ -7,6 +7,7 @@
 const { sequelize, Order, OrderItem, Product, Contractor, User, StockBalance } = require('../../models');
 const { fn, col } = require('sequelize');
 const { today } = require('../utils/date');
+const currencies = require('./currencies');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const round = (v) => Math.round(v * 100) / 100;
@@ -18,7 +19,7 @@ const include = [
   {
     model: OrderItem,
     as: 'items',
-    include: [{ model: Product, as: 'product', attributes: ['id', 'name', 'barcode', 'unit', 'image', 'wholesalePrice', 'retailPrice'] }],
+    include: [{ model: Product, as: 'product', attributes: ['id', 'name', 'barcode', 'unit', 'image', 'wholesalePrice', 'retailPrice', 'currency'] }],
   },
 ];
 const order = [['id', 'DESC']];
@@ -83,16 +84,20 @@ async function create(input) {
     const products = await Product.findAll({ where: { id: [...merged.keys()] }, transaction: t });
     const byId = new Map(products.map((p) => [p.id, p]));
     const lines = [];
+    // Zakaz so'mda: tovar o'z valyutasida bo'lsa hozirgi kurs bo'yicha o'giriladi
+    const rates = await currencies.rates();
+    const uzs = (amount, cur) => (!cur || cur === 'UZS' ? amount : Math.round(amount * (rates[cur] || 1) * 100) / 100);
     for (const i of merged.values()) {
       const p = byId.get(i.productId);
       if (!p || p.deleted) throw fail(400, 'Tovar topilmadi');
-      const base = priceType === 'wholesale' ? p.wholesalePrice : p.retailPrice;
+      const wholesale = uzs(p.wholesalePrice, p.currency);
+      const base = uzs(priceType === 'wholesale' ? p.wholesalePrice : p.retailPrice, p.currency);
       let price = base;
       // Xodim narxni o'zgartirishi mumkin, lekin diller narxidan past emas
       if (source === 'employee' && i.price !== undefined && i.price !== null && i.price !== '') {
         price = Number(i.price) || 0;
-        if (price < p.wholesalePrice - 0.005) {
-          throw fail(400, `Diller narxidan arzon bo'lishi mumkin emas: ${p.name} (diller narxi: ${p.wholesalePrice})`);
+        if (price < wholesale - 0.005) {
+          throw fail(400, `Diller narxidan arzon bo'lishi mumkin emas: ${p.name} (diller narxi: ${wholesale})`);
         }
       }
       if (price <= 0) throw fail(400, `Tovar narxi belgilanmagan: ${p.name}`);

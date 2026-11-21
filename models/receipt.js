@@ -9,6 +9,7 @@ module.exports = (sequelize, DataTypes) => {
     number: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
     date: { type: DataTypes.DATEONLY, allowNull: false },
     currency: { type: DataTypes.STRING, allowNull: false, defaultValue: 'UZS' },
+    rate: { type: DataTypes.FLOAT, allowNull: true }, // valyuta kursi hujjat yaratilgan paytda (1 birlik = N UZS)
     note: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
     total: money(),
     posted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // provodka qilingan

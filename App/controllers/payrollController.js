@@ -1,4 +1,5 @@
 const { sequelize, Payroll, PayrollItem, Contractor, User } = require('../../models');
+const currencies = require('../services/currencies');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const num = (v) => Number(v) || 0;
@@ -30,11 +31,16 @@ async function save(req, existing) {
 
   const period = /^\d{4}-\d{2}$/.test(b.period || '') ? b.period : today().slice(0, 7);
 
+  const currency = b.currency || 'UZS';
+  const currentRate = await currencies.assertKnown(currency);
+  const rate = existing && existing.currency === currency && existing.rate ? existing.rate : currentRate;
+
   const id = await sequelize.transaction(async (t) => {
     const data = {
       date: b.date || today(),
       period,
-      currency: b.currency || 'UZS',
+      currency,
+      rate,
       comment: b.comment || '',
       total: items.reduce((s, i) => s + i.amount, 0),
       posted: !!b.post,

@@ -1,8 +1,10 @@
 const { Op, fn, col } = require('sequelize');
 const { sequelize, Product, ProductCategory, StockBalance, ReceiptItem, SaleItem, SaleReturnItem, WriteOff, OrderItem } = require('../../models');
 const images = require('../services/productImages');
+const { matcher, byName } = require('../utils/search');
 
-const FIELDS = ['name', 'barcode', 'purchasePrice', 'wholesalePrice', 'retailPrice', 'categoryId', 'unit'];
+const FIELDS = ['name', 'barcode', 'purchasePrice', 'wholesalePrice', 'retailPrice', 'categoryId', 'unit', 'currency'];
+const currencies = require('../services/currencies');
 // O'lchov birliklari (ekranda tarjima qilinadi: dona/шт, kg/кг, gr/гр, m/м, l/л, qadoq/уп)
 const UNITS = ['pcs', 'kg', 'g', 'm', 'l', 'pack'];
 
@@ -39,13 +41,11 @@ exports.list = async (req, res) => {
   if (categoryId === 'none') where.categoryId = null;
   else if (categoryId) where.categoryId = Number(categoryId);
 
-  if (q) {
-    const like = { [Op.like]: `%${q}%` };
-    where[Op.or] = [{ name: like }, { barcode: like }];
-  }
+  // Qidiruv (katta-kichik harf farqsiz, har qanday bazada): nomi va shtrix-kod
+  const match = matcher(q);
 
-  const [products, stocks] = await Promise.all([
-    Product.findAll({ where, include, order: [['name', 'ASC']] }),
+  const [all, stocks] = await Promise.all([
+    Product.findAll({ where, include }),
     StockBalance.findAll({
       // warehouseId berilsa - faqat shu ombordagi qoldiq (sotuv oynasi uchun)
       where: warehouseId ? { warehouseId: Number(warehouseId) } : {},
@@ -55,12 +55,15 @@ exports.list = async (req, res) => {
     }),
   ]);
 
+  const products = (match ? all.filter((p) => match([p.name, p.barcode])) : all).sort(byName);
   const stockOf = new Map(stocks.map((s) => [s.productId, Number(s.quantity)]));
   res.json(products.map((p) => ({ ...p.toJSON(), stock: stockOf.get(p.id) || 0 })));
 };
 
 exports.create = async (req, res) => {
   const data = pick(req.body || {});
+  data.currency = data.currency ? String(data.currency) : 'UZS';
+  await currencies.assertKnown(data.currency);
   if (!data.name) return res.status(400).json({ message: 'Tovar nomini kiriting' });
   await checkCategory(data.categoryId);
 
@@ -74,6 +77,10 @@ exports.update = async (req, res) => {
 
   const data = pick(req.body || {});
   if ('name' in data && !data.name) return res.status(400).json({ message: 'Tovar nomini kiriting' });
+  if ('currency' in data) {
+    data.currency = String(data.currency || 'UZS');
+    await currencies.assertKnown(data.currency);
+  }
   await checkCategory(data.categoryId);
 
   await product.update(data);

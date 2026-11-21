@@ -6,6 +6,7 @@ const telegram = require('../services/telegram');
 const orders = require('../services/orders');
 const receiptSettings = require('../services/receiptSettings');
 const { money } = require('../utils/money');
+const currencies = require('../services/currencies');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const initDataOf = (req) => req.headers['x-telegram-init-data'] || (req.body && req.body.initData) || '';
@@ -41,14 +42,17 @@ exports.shopInfo = async (req, res) => {
 exports.shopProducts = async (req, res) => {
   const products = await Product.findAll({
     where: { deleted: false, retailPrice: { [Op.gt]: 0 } },
-    attributes: ['id', 'name', 'retailPrice', 'unit', 'image', 'categoryId'],
+    attributes: ['id', 'name', 'retailPrice', 'currency', 'unit', 'image', 'categoryId'],
     order: [['name', 'ASC']],
   });
   const stock = await orders.stockMap();
+  const rates = await currencies.rates();
+  // Do'konda narx doim so'mda (tovar USD da bo'lsa hozirgi kurs bo'yicha)
+  const uzs = (p) => (!p.currency || p.currency === 'UZS' ? p.retailPrice : Math.round(p.retailPrice * (rates[p.currency] || 1) * 100) / 100);
   res.json(
     products.map((p) => {
       const qty = stock.get(p.id) || 0;
-      return { id: p.id, name: p.name, price: p.retailPrice, unit: p.unit, image: p.image, categoryId: p.categoryId, available: qty > 0, stock: Math.max(0, qty) };
+      return { id: p.id, name: p.name, price: uzs(p), unit: p.unit, image: p.image, categoryId: p.categoryId, available: qty > 0, stock: Math.max(0, qty) };
     }),
   );
 };

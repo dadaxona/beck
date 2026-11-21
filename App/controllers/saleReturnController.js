@@ -13,6 +13,7 @@ const {
   CashDesk,
   User,
 } = require('../../models');
+const currencies = require('../services/currencies');
 const { assertNonNegative } = require('../services/cashbook');
 const { today } = require('../utils/date');
 const { EPS, roundQty } = require('../utils/qty');
@@ -171,6 +172,7 @@ async function save(req, existing) {
       clientId: sale.clientId,
       warehouseId,
       currency: sale.currency,
+      rate: sale.rate || (await currencies.rateOf(sale.currency)),
       total,
       refund,
       onCredit: sale.onCredit,

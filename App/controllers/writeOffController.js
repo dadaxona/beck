@@ -1,4 +1,5 @@
 const { sequelize, WriteOff, WriteOffReturn, Product, StockBalance, Warehouse, User } = require('../../models');
+const currencies = require('../services/currencies');
 const { today } = require('../utils/date');
 const { EPS, roundQty } = require('../utils/qty');
 
@@ -62,7 +63,8 @@ exports.create = async (req, res) => {
     const doc = await WriteOff.create(
       {
         date: b.date || today(),
-        currency: b.currency || 'UZS',
+        currency: product.currency || 'UZS',
+        rate: await currencies.rateOf(product.currency || 'UZS'),
         productId: product.id,
         warehouseId: b.warehouseId,
         quantity,

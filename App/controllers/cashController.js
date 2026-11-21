@@ -8,6 +8,7 @@ const {
   Contractor,
   User,
 } = require('../../models');
+const currencies = require('../services/currencies');
 
 const ledger = require('../services/ledger');
 const { deskBalance, assertNonNegative } = require('../services/cashbook');
@@ -31,9 +32,14 @@ const include = [
 
 // ---------------------------------------------------------------- hujjatlar
 
-function normalize(b, type) {
+async function normalize(b, type, existing) {
   const currency = b.currency || 'UZS';
   const accountCurrency = b.accountCurrency || 'UZS';
+  // O'sha paytdagi kurslar (tahrirlashda valyuta o'zgarmasa eskisi qoladi)
+  const keep = (cur, old, oldRate) => (existing && old === cur && oldRate ? oldRate : null);
+  const rate = keep(currency, existing && existing.currency, existing && existing.rate) || (await currencies.assertKnown(currency));
+  const accountRate =
+    keep(accountCurrency, existing && existing.accountCurrency, existing && existing.accountRate) || (await currencies.assertKnown(accountCurrency));
   const same = currency === accountCurrency;
   const coef1 = same ? 1 : num(b.coef1) || 1;
   const coef2 = same ? 1 : num(b.coef2) || 1;
@@ -48,7 +54,7 @@ function normalize(b, type) {
     cashAmount = num(b.cashAmount);
     accountAmount = cashAmount * k;
   }
-  return { currency, accountCurrency, coef1, coef2, cashAmount: round(cashAmount), accountAmount: round(accountAmount) };
+  return { currency, accountCurrency, rate, accountRate, coef1, coef2, cashAmount: round(cashAmount), accountAmount: round(accountAmount) };
 }
 
 /** Kirim hujjatining "To'langan summa"sidan yaratilgan kassa hujjati faqat kirim orqali o'zgaradi */
@@ -66,7 +72,7 @@ async function save(req, existing) {
   const type = existing ? existing.type : b.type;
   if (!TYPES.includes(type)) throw fail(400, "Hujjat turi noto'g'ri");
 
-  const n = normalize(b, type);
+  const n = await normalize(b, type, existing);
   if (!(n.cashAmount > 0) || !(n.accountAmount > 0)) throw fail(400, 'Summani kiriting');
 
   const data = {

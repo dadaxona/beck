@@ -15,22 +15,30 @@
  *  O'tkazma: yuboruvchidan -, qabul qiluvchiga +
  *
  * Natija: balans > 0  => "Biz qarzdormiz", balans < 0 => "Ular qarzdor".
+ *
+ * Valyutalar: har bir harakat o'z valyutasi va hujjatdagi kursi bilan yig'iladi, so'ng so'ralgan valyutaga
+ * o'giriladi (currencies.converter): o'z valyutasida - asl summa, boshqa valyutadagi hujjat - o'sha paytdagi
+ * kurs bo'yicha so'mga, so'mdan so'ralgan valyutaga hozirgi kurs bo'yicha.
  */
 
 const { Receipt, Sale, CashDocument, Payroll, PayrollItem, SaleReturn, Contractor } = require('../../models');
+const currencies = require('./currencies');
 
 const round = (v) => Math.round(v * 100) / 100;
 
 async function collectMovements({ contractorId = null, currency = null } = {}) {
   const movements = [];
+  const conv = await currencies.converter();
   const hidden = contractorId
     ? new Set()
     : new Set((await Contractor.findAll({ where: { deleted: true }, attributes: ['id'], raw: true })).map((c) => c.id));
   const push = (m) => {
     if (!m.contractorId || hidden.has(m.contractorId)) return;
     if (contractorId && m.contractorId !== contractorId) return;
-    if (currency && m.currency !== currency) return;
-    movements.push(m);
+    // Valyuta berilsa - shu valyutaga o'giriladi (asl summa va valyuta docAmount/docCurrency da qoladi)
+    if (currency) {
+      movements.push({ ...m, docCurrency: m.currency, docAmount: m.amount, amount: conv(m.amount, m.currency, m.rate, currency), currency });
+    } else movements.push(m);
   };
 
   const [receipts, sales, cash, payrolls, saleReturns] = await Promise.all([
@@ -48,6 +56,7 @@ async function collectMovements({ contractorId = null, currency = null } = {}) {
     push({
       contractorId: r.supplierId,
       currency: r.currency,
+      rate: r.rate,
       amount: r.type === 'return' ? -r.total : r.total,
       kind: r.type, // receipt | return | service
       docId: r.id,
@@ -62,6 +71,7 @@ async function collectMovements({ contractorId = null, currency = null } = {}) {
     push({
       contractorId: s.clientId,
       currency: s.currency,
+      rate: s.rate,
       amount: -(s.total - s.paidAmount), // faqat to'lanmagan qismi (sotuv vaqtida to'langani qarz emas)
       kind: 'basket',
       docId: s.id,
@@ -75,12 +85,12 @@ async function collectMovements({ contractorId = null, currency = null } = {}) {
   for (const d of cash) {
     const base = { docId: d.id, number: d.number, date: d.date, createdAt: d.createdAt, comment: d.comment };
     if (d.type === 'income') {
-      push({ ...base, contractorId: d.contractorId, currency: d.accountCurrency, amount: d.accountAmount, kind: 'cash_income' });
+      push({ ...base, contractorId: d.contractorId, currency: d.accountCurrency, rate: d.accountRate, amount: d.accountAmount, kind: 'cash_income' });
     } else if (d.type === 'expense') {
-      push({ ...base, contractorId: d.contractorId, currency: d.accountCurrency, amount: -d.accountAmount, kind: 'cash_expense' });
+      push({ ...base, contractorId: d.contractorId, currency: d.accountCurrency, rate: d.accountRate, amount: -d.accountAmount, kind: 'cash_expense' });
     } else if (d.type === 'transfer') {
-      push({ ...base, contractorId: d.fromContractorId, currency: d.currency, amount: -d.cashAmount, kind: 'transfer_out' });
-      push({ ...base, contractorId: d.toContractorId, currency: d.accountCurrency, amount: d.accountAmount, kind: 'transfer_in' });
+      push({ ...base, contractorId: d.fromContractorId, currency: d.currency, rate: d.rate, amount: -d.cashAmount, kind: 'transfer_out' });
+      push({ ...base, contractorId: d.toContractorId, currency: d.accountCurrency, rate: d.accountRate, amount: d.accountAmount, kind: 'transfer_in' });
     }
   }
 
@@ -89,7 +99,7 @@ async function collectMovements({ contractorId = null, currency = null } = {}) {
   for (const r of saleReturns) {
     const net = r.total - r.refund;
     if (!r.clientId || (!r.onCredit && net <= 0.005)) continue;
-    const base = { contractorId: r.clientId, currency: r.currency, docId: r.id, number: r.number, date: r.date, createdAt: r.createdAt, comment: r.comment };
+    const base = { contractorId: r.clientId, currency: r.currency, rate: r.rate, docId: r.id, number: r.number, date: r.date, createdAt: r.createdAt, comment: r.comment };
     push({ ...base, amount: r.total, kind: 'sale_return' });
     if (r.refund > 0.005) push({ ...base, amount: -r.refund, kind: 'sale_return_refund' });
   }
@@ -100,6 +110,7 @@ async function collectMovements({ contractorId = null, currency = null } = {}) {
     push({
       contractorId: i.contractorId,
       currency: p.currency,
+      rate: p.rate,
       amount: i.amount,
       kind: 'payroll',
       docId: p.id,
@@ -113,7 +124,7 @@ async function collectMovements({ contractorId = null, currency = null } = {}) {
   return movements;
 }
 
-/** Bitta kontragent balansi (berilgan valyutada) */
+/** Bitta kontragent balansi (barcha valyutalardagi harakatlar berilgan valyutaga o'girilgan) */
 async function contractorBalance(id, currency) {
   const movements = await collectMovements({ contractorId: id, currency });
   return round(movements.reduce((s, m) => s + m.amount, 0));

@@ -10,6 +10,7 @@ const {
   CashDesk,
   CashDocument,
 } = require('../../models');
+const currencies = require('../services/currencies');
 const { assertNonNegative } = require('../services/cashbook');
 const { today } = require('../utils/date');
 const { EPS, roundQty, roundMoney } = require('../utils/qty');
@@ -76,11 +77,12 @@ async function applyDelta(delta, t) {
  * Kirim o'chirilsa yoki provodkasi bekor qilinsa, narxlar oldingi kirimdagiga qaytadi.
  * Boshqa kirim bo'lmasa, olish narxi o'chirilgan qatordagi "oldingi olish narxi"ga qaytariladi.
  */
+/* Narxlar kirim valyutasida yoziladi va tovar valyutasi ham kirim valyutasiga o'tadi (100 USD = 100, USD) */
 async function syncPrices(productIds, t, fallback = []) {
   for (const productId of new Set(productIds)) {
     const last = await ReceiptItem.findOne({
       where: { productId },
-      include: [{ model: Receipt, attributes: [], where: { posted: true, type: 'receipt' }, required: true }],
+      include: [{ model: Receipt, attributes: ['currency'], where: { posted: true, type: 'receipt' }, required: true }],
       order: [
         [Receipt, 'date', 'DESC'],
         [Receipt, 'id', 'DESC'],
@@ -90,7 +92,12 @@ async function syncPrices(productIds, t, fallback = []) {
     });
     if (last) {
       await Product.update(
-        { purchasePrice: last.purchasePrice, wholesalePrice: last.wholesalePrice, retailPrice: last.retailPrice },
+        {
+          purchasePrice: last.purchasePrice,
+          wholesalePrice: last.wholesalePrice,
+          retailPrice: last.retailPrice,
+          currency: (last.Receipt && last.Receipt.currency) || 'UZS',
+        },
         { where: { id: productId }, transaction: t },
       );
     } else {
@@ -126,6 +133,8 @@ async function syncPayment(doc, t, userId) {
         partyType: 'contractor',
         currency: doc.currency,
         accountCurrency: doc.currency,
+        rate: doc.rate,
+        accountRate: doc.rate,
         cashAmount: doc.paidAmount,
         accountAmount: doc.paidAmount,
         coef1: 1,
@@ -206,6 +215,11 @@ async function save(req, res, existing) {
     throw fail(400, "Summa manfiy bo'lishi mumkin emas");
   }
 
+  // Valyuta va o'sha paytdagi kurs (tahrirlashda valyuta o'zgarmasa eski kurs qoladi)
+  const currency = b.currency || 'UZS';
+  const currentRate = await currencies.assertKnown(currency);
+  const rate = existing && existing.currency === currency && existing.rate ? existing.rate : currentRate;
+
   const id = await sequelize.transaction(async (t) => {
     let doc = existing;
     const delta = new Map();
@@ -228,7 +242,8 @@ async function save(req, res, existing) {
       checkExpiry: !!b.checkExpiry,
       ...extra,
       warehouseId: b.warehouseId,
-      currency: b.currency || 'UZS',
+      currency,
+      rate,
       note: b.note || '',
       total,
       posted: !!b.post,

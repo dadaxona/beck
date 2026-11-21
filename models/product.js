@@ -6,6 +6,7 @@ module.exports = (sequelize, DataTypes) => {
   const Product = sequelize.define('Product', {
     name: { type: DataTypes.STRING, allowNull: false },
     barcode: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
+    currency: { type: DataTypes.STRING, allowNull: false, defaultValue: 'UZS' }, // narxlar valyutasi (100 USD = 100, USD)
     purchasePrice: price(),  // Olish narxi (oxirgi kirim)
     wholesalePrice: price(), // Diller narxi (eng past sotish narxi)
     retailPrice: price(),    // Sotish narxi

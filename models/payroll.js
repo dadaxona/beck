@@ -11,6 +11,7 @@ module.exports = (sequelize, DataTypes) => {
     date: { type: DataTypes.DATEONLY, allowNull: false },
     period: { type: DataTypes.STRING, allowNull: false, defaultValue: '' }, // YYYY-MM
     currency: { type: DataTypes.STRING, allowNull: false, defaultValue: 'UZS' },
+    rate: { type: DataTypes.FLOAT, allowNull: true }, // valyuta kursi hujjat yaratilgan paytda (1 birlik = N UZS)
     comment: { type: DataTypes.STRING, allowNull: false, defaultValue: '' },
     total: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
     posted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },

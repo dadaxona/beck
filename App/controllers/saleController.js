@@ -20,6 +20,7 @@ const { today } = require('../utils/date');
 const { EPS, roundQty } = require('../utils/qty');
 const ledger = require('../services/ledger');
 const ordersService = require('../services/orders');
+const currencies = require('../services/currencies');
 const telegram = require('../services/telegram');
 
 const RETAIL_CLIENT = 'Chakana mijoz';
@@ -146,6 +147,13 @@ exports.create = async (req, res) => {
     }
   }
 
+  // Sotuv valyutasi va uning hozirgi kursi (sotuvda saqlanadi: keyin kurs o'zgarsa ham sotuv o'sha kursda qoladi)
+  const currency = b.currency || 'UZS';
+  const rate = await currencies.assertKnown(currency);
+  // Tovar narxlari o'z valyutasida saqlanadi: sotuv valyutasiga hozirgi kurs bo'yicha o'giriladi (frontend bilan bir xil yaxlitlash)
+  const rates = await currencies.rates();
+  const inSale = (amount, from) => (from === currency ? amount : Math.round(((amount * (rates[from] || 1)) / rate) * 100) / 100);
+
   // Qarz muddati (faqat savat uchun): YYYY-MM-DD, bugundan oldin bo'lishi mumkin emas
   const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || '')) ? String(b.dueDate) : null;
   if (dueDate && dueDate < today()) throw fail(400, "Qarz muddati bugundan oldin bo'lishi mumkin emas");
@@ -162,8 +170,9 @@ exports.create = async (req, res) => {
       if (byId.get(i.productId).deleted) throw fail(400, `Tovar o'chirilgan: ${byId.get(i.productId).name}`);
       // Chegara: diller narxidan arzon sotish mumkin emas (yuqori narxda sotish mumkin)
       const product = byId.get(i.productId);
-      if (i.price < product.wholesalePrice - 0.005) {
-        throw fail(400, `Diller narxidan arzon sotish mumkin emas: ${product.name} (diller narxi: ${product.wholesalePrice})`);
+      const wholesale = inSale(product.wholesalePrice, product.currency);
+      if (i.price < wholesale - 0.005) {
+        throw fail(400, `Diller narxidan arzon sotish mumkin emas: ${product.name} (diller narxi: ${wholesale} ${currency})`);
       }
       need.set(i.productId, (need.get(i.productId) || 0) + i.quantity);
     }
@@ -178,7 +187,8 @@ exports.create = async (req, res) => {
 
     const lines = items.map((i) => ({
       ...i,
-      costPrice: byId.get(i.productId).purchasePrice,
+      // Tannarx sotuv valyutasida (sotuv paytidagi kurs bilan)
+      costPrice: inSale(byId.get(i.productId).purchasePrice, byId.get(i.productId).currency),
       sum: round(i.quantity * i.price),
     }));
 
@@ -189,7 +199,7 @@ exports.create = async (req, res) => {
     const total = round(Math.max(subtotal + markup, 0));
 
     // Chegirma (manfiy ustama) ham jami summani diller narxidan pastga tushira olmaydi
-    const minTotal = lines.reduce((sum, l) => sum + l.quantity * byId.get(l.productId).wholesalePrice, 0);
+    const minTotal = lines.reduce((sum, l) => sum + l.quantity * inSale(byId.get(l.productId).wholesalePrice, byId.get(l.productId).currency), 0);
     if (total < minTotal - 0.005) {
       throw fail(400, `Ustama/chegirma bilan jami summa diller narxidan past bo'lishi mumkin emas (minimum: ${minTotal})`);
     }
@@ -210,8 +220,11 @@ exports.create = async (req, res) => {
 
     // Qarz limiti (kontragent kartochkasidagi "Qarzga sotish (limit)"; 0 = cheklanmagan)
     if (isBasket && client.creditLimit > 0.005) {
-      const balance = await ledger.contractorBalance(client.id, b.currency || 'UZS');
-      const debtAfter = round(Math.max(-balance, 0) + (total - paid));
+      // Limit kontragent kartochkasidagi valyutada; sotuv summasi shu valyutaga o'giriladi
+      const limitCurrency = client.currency || 'UZS';
+      const conv = await currencies.converter();
+      const balance = await ledger.contractorBalance(client.id, limitCurrency);
+      const debtAfter = round(Math.max(-balance, 0) + conv(total - paid, currency, rate, limitCurrency));
       if (debtAfter > client.creditLimit + 0.005) {
         throw fail(400, `Qarz limiti oshib ketdi: ${client.name} (limit: ${client.creditLimit}, qarz bo'ladi: ${debtAfter})`);
       }
@@ -222,9 +235,9 @@ exports.create = async (req, res) => {
       if (known !== new Set(payments.map((p) => p.cashDeskId)).size) throw fail(400, "To'lov uchun kassani tanlang");
     }
 
-    const currency = b.currency || 'UZS';
     const sale = await Sale.create(
       {
+        rate,
         onCredit: isBasket,
         paidAmount: isBasket ? paid : total,
         dueDate: isBasket ? dueDate : null,

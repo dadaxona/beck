@@ -18,6 +18,8 @@ const roleController = require('../controllers/roleController')
 const printController = require('../controllers/printController')
 const orderController = require('../controllers/orderController')
 const telegramController = require('../controllers/telegramController')
+const currencyController = require('../controllers/currencyController')
+const transferController = require('../controllers/transferController')
 const auth = require('../middlewares/auth')
 const { permit, permitAny } = require('../middlewares/permit')
 const router = Router();
@@ -76,6 +78,23 @@ router.post('/products/:id/restore', permit('products', 'delete'), productContro
 router.delete('/products/:id/purge', permit('products', 'purge'), productController.purge)
 
 router.get('/warehouses', warehouseController.list)
+router.post('/warehouses', permit('settings', 'edit'), warehouseController.create)
+router.put('/warehouses/:id', permit('settings', 'edit'), warehouseController.update)
+router.delete('/warehouses/:id', permit('settings', 'edit'), warehouseController.remove)
+
+// Valyutalar va kurslar (Sozlamalar → Valyutalar). Ro'yxat hammaga ochiq: narxlarni o'girish uchun kerak
+router.get('/currencies', currencyController.list)
+router.post('/currencies', permit('settings', 'edit'), currencyController.create)
+router.put('/currencies/:code', permit('settings', 'edit'), currencyController.update)
+router.delete('/currencies/:code', permit('settings', 'edit'), currencyController.remove)
+
+// Ombordan omborga ko'chirish
+router.get('/transfers', permit('transfers'), transferController.list)
+router.get('/transfers/:id', permit('transfers'), transferController.get)
+router.post('/transfers', permit('transfers', 'create'), transferController.create)
+router.delete('/transfers/:id', permit('transfers', 'delete'), transferController.remove)
+router.post('/transfers/:id/restore', permit('transfers', 'delete'), transferController.restore)
+router.delete('/transfers/:id/purge', permit('transfers', 'purge'), transferController.purge)
 
 router.get('/receipts', readDoc('receipts'), receiptController.list)
 router.post('/receipts', permit('receipts', 'create'), receiptController.create)

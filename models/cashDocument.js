@@ -24,6 +24,8 @@ module.exports = (sequelize, DataTypes) => {
 
     currency: { type: DataTypes.STRING, allowNull: false, defaultValue: 'UZS' },        // kassa valyutasi (transferda: chiqish valyutasi)
     accountCurrency: { type: DataTypes.STRING, allowNull: false, defaultValue: 'UZS' }, // hisob valyutasi (transferda: oxirgi valyuta)
+    rate: { type: DataTypes.FLOAT, allowNull: true },        // kassa valyutasi kursi (hujjat paytida)
+    accountRate: { type: DataTypes.FLOAT, allowNull: true }, // hisob valyutasi kursi (hujjat paytida)
     cashAmount: money(),
     accountAmount: money(),
     coef1: money(1),

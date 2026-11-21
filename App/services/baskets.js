@@ -12,20 +12,24 @@
 const { Op } = require('sequelize');
 const { Sale, CashDocument, SaleReturn } = require('../../models');
 const returnsService = require('./returns');
+const currencies = require('./currencies');
 
 const round = (v) => Math.round(v * 100) / 100;
 
 /** { saleId -> { paid, debt, status } } faqat savatdagi (onCredit) sotuvlar uchun */
 async function computeStatuses() {
   const returns = await returnsService.summary();
+  const conv = await currencies.converter();
+  // Hamma summalar so'mga (hujjatdagi kurs bo'yicha) keltiriladi: USD dagi savatni so'mda to'lash ham uni yopadi
+  const toBase = (amount, currency, rate) => conv(amount, currency, rate, 'UZS');
   const [baskets, cash, saleReturns] = await Promise.all([
     Sale.findAll({
       where: { onCredit: true, deleted: false },
-      attributes: ['id', 'clientId', 'currency', 'total', 'paidAmount', 'date', 'createdAt'],
+      attributes: ['id', 'clientId', 'currency', 'rate', 'total', 'paidAmount', 'date', 'createdAt'],
       raw: true,
     }),
     CashDocument.findAll({ where: { posted: true }, raw: true }),
-    SaleReturn.findAll({ where: { posted: true }, attributes: ['clientId', 'currency', 'total', 'refund', 'onCredit'], raw: true }),
+    SaleReturn.findAll({ where: { posted: true }, attributes: ['clientId', 'currency', 'rate', 'total', 'refund', 'onCredit'], raw: true }),
   ]);
 
   /*
@@ -36,23 +40,23 @@ async function computeStatuses() {
    *  + to'langan sotuvni qaytarib, pul to'liq qaytarilmagan qismi (uning foydasiga yozilgan)
    */
   const pool = new Map();
-  const add = (contractorId, currency, amount) => {
+  // Mijoz bo'yicha (so'mda) savatlarni yopishga ishlatiladigan summa
+  const add = (contractorId, currency, rate, amount) => {
     if (!contractorId) return;
-    const key = `${contractorId}:${currency}`;
-    pool.set(key, (pool.get(key) || 0) + amount);
+    pool.set(contractorId, (pool.get(contractorId) || 0) + toBase(amount, currency, rate));
   };
   for (const d of cash) {
     if (d.partyType === 'other') continue;
-    if (d.type === 'income') add(d.contractorId, d.accountCurrency, d.accountAmount);
-    if (d.type === 'expense') add(d.contractorId, d.accountCurrency, -d.accountAmount);
+    if (d.type === 'income') add(d.contractorId, d.accountCurrency, d.accountRate, d.accountAmount);
+    if (d.type === 'expense') add(d.contractorId, d.accountCurrency, d.accountRate, -d.accountAmount);
     if (d.type === 'transfer') {
-      add(d.toContractorId, d.accountCurrency, d.accountAmount);
-      add(d.fromContractorId, d.currency, -d.cashAmount);
+      add(d.toContractorId, d.accountCurrency, d.accountRate, d.accountAmount);
+      add(d.fromContractorId, d.currency, d.rate, -d.cashAmount);
     }
   }
   for (const r of saleReturns) {
-    if (r.onCredit) add(r.clientId, r.currency, -r.refund);
-    else if (r.total - r.refund > 0.005) add(r.clientId, r.currency, r.total - r.refund);
+    if (r.onCredit) add(r.clientId, r.currency, r.rate, -r.refund);
+    else if (r.total - r.refund > 0.005) add(r.clientId, r.currency, r.rate, r.total - r.refund);
   }
 
   baskets.sort(
@@ -64,14 +68,16 @@ async function computeStatuses() {
 
   const result = new Map();
   for (const s of baskets) {
-    const key = `${s.clientId}:${s.currency}`;
     // Qaytarilgan tovarlar summasi sotuv summasidan ayriladi
     const returned = returns.bySale.get(s.id) || 0;
     const effectiveTotal = Math.max(s.total - returned, 0);
     const remaining = Math.max(effectiveTotal - s.paidAmount, 0);
-    const available = Math.max(pool.get(key) || 0, 0);
-    const take = Math.min(available, remaining);
-    pool.set(key, available - take);
+    // Savat qoldig'i so'mda (sotuv paytidagi kurs bilan) -> pul yetganicha yopiladi -> sotuv valyutasiga qaytariladi
+    const k = toBase(1, s.currency, s.rate) || 1;
+    const available = Math.max(pool.get(s.clientId) || 0, 0);
+    const takeBase = Math.min(available, remaining * k);
+    pool.set(s.clientId, available - takeBase);
+    const take = takeBase / k;
 
     const paid = round(s.paidAmount + take);
     const debt = round(Math.max(effectiveTotal - paid, 0));

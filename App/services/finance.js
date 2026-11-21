@@ -3,7 +3,9 @@
 /**
  * Moliyaviy ko'rsatkichlar (dashboard va "Moliya hisoboti" sahifasi uchun).
  *
- * Hammasi BIR valyutada (currency) hisoblanadi.
+ * Hammasi BIR valyutada (currency) ko'rsatiladi: boshqa valyutadagi hujjatlar o'sha paytdagi kurs bo'yicha
+ * so'mga, so'mdan tanlangan valyutaga hozirgi kurs bo'yicha o'giriladi (currencies.converter).
+ * Ombordagi tovar va kassadagi pul esa hozirgi kurs bo'yicha baholanadi.
  *  Sof savdo     = sotuvlar jami - mijozdan qaytarilgan tovar summasi
  *  Tannarx       = sotilgan tovarning olish narxi (sotuv paytida saqlangan) - qaytarilganining tannarxi
  *  Yalpi foyda   = sof savdo - tannarx
@@ -24,6 +26,7 @@ const ledger = require('./ledger');
 const cashbook = require('./cashbook');
 const returnsService = require('./returns');
 const { today } = require('../utils/date');
+const currencies = require('./currencies');
 
 const round = (v) => Math.round(v * 100) / 100;
 const sum = (rows, pick) => rows.reduce((s, r) => s + pick(r), 0);
@@ -38,21 +41,23 @@ const addDays = (isoDate, n) => {
 
 /** Valyuta bo'yicha barcha kerakli yozuvlarni bir marta yuklaydi (keyin summarize istalgan davr uchun ishlaydi) */
 async function loadData(currency) {
+  const conv = await currencies.converter();
+  const to = (amount, row) => conv(amount, row.currency, row.rate, currency);
   const [sales, returns, returnItems, payrolls, services, cashOther, statuses, writeOffs, writeOffReturns, receiptExtras, hiddenClients] = await Promise.all([
-    Sale.findAll({ where: { currency, deleted: false }, attributes: ['id', 'date', 'total', 'costTotal', 'clientId'], raw: true }),
-    SaleReturn.findAll({ where: { currency, posted: true }, attributes: ['id', 'date', 'total'], raw: true }),
+    Sale.findAll({ where: { deleted: false }, attributes: ['id', 'date', 'total', 'costTotal', 'clientId', 'currency', 'rate'], raw: true }),
+    SaleReturn.findAll({ where: { posted: true }, attributes: ['id', 'date', 'total', 'currency', 'rate'], raw: true }),
     SaleReturnItem.findAll({ attributes: ['saleReturnId', 'saleItemId', 'quantity'], raw: true }),
-    Payroll.findAll({ where: { currency, posted: true }, attributes: ['date', 'total'], raw: true }),
-    Receipt.findAll({ where: { currency, posted: true, type: 'service' }, attributes: ['date', 'total'], raw: true }),
+    Payroll.findAll({ where: { posted: true }, attributes: ['date', 'total', 'currency', 'rate'], raw: true }),
+    Receipt.findAll({ where: { posted: true, type: 'service' }, attributes: ['date', 'total', 'currency', 'rate'], raw: true }),
     CashDocument.findAll({
-      where: { currency, posted: true, partyType: 'other', type: { [Op.in]: ['income', 'expense'] } },
-      attributes: ['date', 'type', 'cashAmount'],
+      where: { posted: true, partyType: 'other', type: { [Op.in]: ['income', 'expense'] } },
+      attributes: ['date', 'type', 'cashAmount', 'currency', 'rate'],
       raw: true,
     }),
     baskets.computeStatuses(),
-    WriteOff.findAll({ where: { currency, posted: true }, attributes: ['id', 'date', 'quantity', 'costPrice'], raw: true }),
+    WriteOff.findAll({ where: { posted: true }, attributes: ['id', 'date', 'quantity', 'costPrice', 'currency', 'rate'], raw: true }),
     WriteOffReturn.findAll({ attributes: ['writeOffId', 'quantity'], raw: true }),
-    Receipt.findAll({ where: { currency, posted: true, extraTotal: { [Op.gt]: 0 } }, attributes: ['date', 'extraTotal'], raw: true }),
+    Receipt.findAll({ where: { posted: true, extraTotal: { [Op.gt]: 0 } }, attributes: ['date', 'extraTotal', 'currency', 'rate'], raw: true }),
     Contractor.findAll({ where: { deleted: true }, attributes: ['id'], raw: true }),
   ]);
   // O'chirishga belgilangan mijozlarning qarzi (qarz hisobotlaridagi kabi) to'lanmaganlarga kirmaydi
@@ -73,14 +78,20 @@ async function loadData(currency) {
     returnCost.set(i.saleReturnId, (returnCost.get(i.saleReturnId) || 0) + i.quantity * (costOf.get(i.saleItemId) || 0));
   }
 
+  // Hammasi tanlangan valyutaga o'giriladi (sotuv tannarxi va qaytarish tannarxi sotuv valyutasida saqlangan)
   return {
-    sales: sales.map((s) => ({ ...s, debt: hidden.has(s.clientId) ? 0 : statuses.get(s.id)?.debt || 0 })),
-    returns: returns.map((r) => ({ ...r, cost: returnCost.get(r.id) || 0 })),
-    payrolls,
-    services,
-    cashOther,
-    receiptExtras,
-    writeOffs: writeOffs.map((w) => ({ date: w.date, loss: Math.max(w.quantity - (backQty.get(w.id) || 0), 0) * w.costPrice })),
+    sales: sales.map((s) => ({
+      date: s.date,
+      total: to(s.total, s),
+      costTotal: to(s.costTotal, s),
+      debt: hidden.has(s.clientId) ? 0 : to(statuses.get(s.id)?.debt || 0, s),
+    })),
+    returns: returns.map((r) => ({ date: r.date, total: to(r.total, r), cost: to(returnCost.get(r.id) || 0, r) })),
+    payrolls: payrolls.map((p) => ({ date: p.date, total: to(p.total, p) })),
+    services: services.map((p) => ({ date: p.date, total: to(p.total, p) })),
+    cashOther: cashOther.map((c) => ({ date: c.date, type: c.type, cashAmount: to(c.cashAmount, c) })),
+    receiptExtras: receiptExtras.map((r) => ({ date: r.date, extraTotal: to(r.extraTotal, r) })),
+    writeOffs: writeOffs.map((w) => ({ date: w.date, loss: to(Math.max(w.quantity - (backQty.get(w.id) || 0), 0) * w.costPrice, w) })),
   };
 }
 
@@ -156,11 +167,12 @@ async function debts(currency, to) {
   };
 }
 
-/** Omborda hozir turgan tovar: olish va sotish narxida (narxlar valyutasiz, asosiy valyutada) */
-async function stock() {
+/** Omborda hozir turgan tovar: olish va sotish narxida (tovar valyutasidan hozirgi kurs bo'yicha o'girilgan) */
+async function stock(currency = 'UZS') {
+  const conv = await currencies.converter();
   const [balances, products] = await Promise.all([
     StockBalance.findAll({ attributes: ['productId', 'quantity'], raw: true }),
-    Product.findAll({ where: { deleted: false }, attributes: ['id', 'purchasePrice', 'retailPrice'], raw: true }),
+    Product.findAll({ where: { deleted: false }, attributes: ['id', 'purchasePrice', 'retailPrice', 'currency'], raw: true }),
   ]);
   const price = new Map(products.map((p) => [p.id, p]));
   const qty = new Map();
@@ -173,18 +185,26 @@ async function stock() {
   for (const [id, q] of qty) {
     const p = price.get(id);
     if (!p || q <= 0.0005) continue;
-    costValue += q * p.purchasePrice;
-    retailValue += q * p.retailPrice;
+    costValue += q * conv(p.purchasePrice, p.currency, null, currency);
+    retailValue += q * conv(p.retailPrice, p.currency, null, currency);
     quantity += q;
     kinds++;
   }
   return { costValue: round(costValue), retailValue: round(retailValue), quantity: round(quantity), kinds };
 }
 
+/** Barcha kassalardagi pul (har valyutadagi qoldiq hozirgi kurs bo'yicha tanlangan valyutaga o'girilib) */
+async function cashTotal(currency) {
+  const conv = await currencies.converter();
+  let total = 0;
+  for (const c of await currencies.list()) total += conv(await cashbook.deskBalance(null, c.code), c.code, null, currency);
+  return round(total);
+}
+
 /** "Moliya hisoboti" sahifasi */
 async function financeReport(currency, from, to) {
   const data = await loadData(currency);
-  const [d, st, cashBalance] = await Promise.all([debts(currency, to), stock(), cashbook.deskBalance(null, currency)]);
+  const [d, st, cashBalance] = await Promise.all([debts(currency, to), stock(currency), cashTotal(currency)]);
   const { balances, ...debt } = d; // eslint-disable-line no-unused-vars
   return { currency, from: from || null, to: to || null, ...summarize(data, from, to), debts: debt, stock: st, cash: cashBalance };
 }
@@ -210,10 +230,10 @@ async function dashboard(currency) {
 
   const [d, st, cashBalance, items, returns] = await Promise.all([
     debts(currency, now),
-    stock(),
-    cashbook.deskBalance(null, currency),
+    stock(currency),
+    cashTotal(currency),
     SaleItem.findAll({
-      include: [{ model: Sale, attributes: [], required: true, where: { currency, deleted: false, date: { [Op.gte]: days[0] } } }],
+      include: [{ model: Sale, attributes: ['currency', 'rate'], required: true, where: { deleted: false, date: { [Op.gte]: days[0] } } }],
       attributes: ['id', 'productId', 'quantity', 'sum'],
       raw: true,
     }),
@@ -221,12 +241,14 @@ async function dashboard(currency) {
   ]);
 
   // Eng ko'p sotilgan tovarlar (30 kun, qaytarilgani ayrilgan)
+  // Summa tanlangan valyutada (sotuv paytidagi kurs bo'yicha)
+  const conv = await currencies.converter();
   const byProduct = new Map();
   for (const i of items) {
-    const unit = i.quantity ? i.sum / i.quantity : 0;
+    const unit = i.quantity ? conv(i.sum, i['Sale.currency'], i['Sale.rate'], currency) / i.quantity : 0;
     const back = returns.byItem.get(i.id) || 0;
     const cur = byProduct.get(i.productId) || { sum: 0, qty: 0 };
-    cur.sum += i.sum - back * unit;
+    cur.sum += unit * (i.quantity - back);
     cur.qty += i.quantity - back;
     byProduct.set(i.productId, cur);
   }

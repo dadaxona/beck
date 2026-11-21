@@ -1,7 +1,8 @@
-const { Op, fn, col, where: sqlWhere } = require('sequelize');
+const { Op } = require('sequelize');
 const { User, Contractor, Category, Receipt, Sale, CashDocument, PayrollItem, SaleReturn } = require('../../models');
 
 const blacklist = require('../services/blacklist');
+const { matcher, byName } = require('../utils/search');
 
 const FIELDS = [
   'name', 'legalName', 'legalAddress', 'postalAddress', 'phones', 'inn', 'oked', 'vatCode',
@@ -31,18 +32,11 @@ exports.list = async (req, res) => {
   if (categoryId === 'none') where.categoryId = null;
   else if (categoryId) where.categoryId = Number(categoryId);
 
-  if (q) {
-    const like = { [Op.like]: `%${q}%` };
-    where[Op.or] = [{ name: like }, { legalName: like }, { inn: like }, { phones: like }];
-    // Telefon "+998 90 123 45 67" ko'rinishida saqlanadi: "901234567" deb qidirilsa ham topilsin
-    const digits = String(q).replace(/\D/g, '');
-    if (digits.length >= 3) {
-      where[Op.or].push(sqlWhere(fn('REPLACE', col('Contractor.phones'), ' ', ''), { [Op.like]: `%${digits}%` }));
-    }
-  }
-
-  const contractors = await Contractor.findAll({ where, include, order: [['name', 'ASC']] });
-  res.json(contractors);
+  // Qidiruv (katta-kichik harf farqsiz, har qanday bazada): nomi, yuridik nomi, INN, telefon (raqamlar bo'yicha ham)
+  const match = matcher(q);
+  let contractors = await Contractor.findAll({ where, include });
+  if (match) contractors = contractors.filter((c) => match([c.name, c.legalName, c.inn, c.phones], [c.phones]));
+  res.json(contractors.sort(byName));
 };
 
 exports.create = async (req, res) => {
