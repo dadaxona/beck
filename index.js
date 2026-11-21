@@ -66,6 +66,7 @@ syncSchema(sequelize) // jadvallar va yangi ustunlar modellardan avtomatik
     // standart kassalar va modda (ketma-ket: SQLite parallel transaction'ni qabul qilmaydi)
     .then(() => CashDesk.findOrCreate({ where: { name: 'Naqd' } }))
     .then(() => CashDesk.findOrCreate({ where: { name: 'Plastik' } }))
+    .then(() => CashDesk.findOrCreate({ where: { name: 'Bank' } }))
     .then(() => CashArticle.findOrCreate({ where: { name: "To'lov" } }))
     .then(() => ensureBlacklistCategory()) // "Qora ro'yxat" kategoriyasi; avval belgilanganlar ham unga tushadi
     .then((cat) => Contractor.update({ categoryId: cat.id }, { where: { blacklisted: true } }))

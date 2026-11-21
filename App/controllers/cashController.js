@@ -224,5 +224,18 @@ const catalog = (Model) => ({
   },
 });
 
-exports.desks = catalog(CashDesk);
+// Kassalar tartibi: Naqd (standart, sotuvda birinchi tanlanadi), Plastik, Bank; qolganlari alifbo bo'yicha
+const DESK_ORDER = ['Naqd', 'Plastik', 'Bank'];
+const deskRank = (name) => {
+  const i = DESK_ORDER.indexOf(name);
+  return i < 0 ? DESK_ORDER.length : i;
+};
+exports.desks = {
+  ...catalog(CashDesk),
+  list: async (req, res) => {
+    const rows = await CashDesk.findAll({ order: [['name', 'ASC']] });
+    rows.sort((a, b) => deskRank(a.name) - deskRank(b.name));
+    res.json(rows);
+  },
+};
 exports.articles = catalog(CashArticle);
