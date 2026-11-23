@@ -4,6 +4,7 @@
 /node_modules
 /database/dev.sqlite
 # /public
+/text.txt
 /dist
 /.pnp
 .pnp.*
@@ -46,3 +47,5 @@ next-env.d.ts
 /database/.jwt-secret
 /database/*.sqlite-wal
 /database/*.sqlite-shm
+# server paroli va deploy eslatmalari - GitHub ga yuklanmasin
+/text.txt

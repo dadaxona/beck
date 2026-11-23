@@ -1,7 +1,10 @@
 {
   "development": {
-    "dialect": "sqlite",
-    "storage": "database/dev.sqlite",
+    "username": "postgres",
+    "password": "1122",
+    "database": "onec",
+    "host": "127.0.0.1",
+    "dialect": "postgres",
     "logging": false
   },
   "test": {
