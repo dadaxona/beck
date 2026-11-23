@@ -16,6 +16,8 @@ const { ipcMain, shell, WebContentsView } = require('electron');
 // Kirish (login) sahifalari: Google / Microsoft / Apple orqali kirish panel ichida ishlashi uchun
 const AUTH = String.raw`accounts\.google\.com|([a-z0-9-]+\.)*google\.com|gstatic\.com|googleusercontent\.com|login\.live\.com|login\.microsoftonline\.com|appleid\.apple\.com`;
 const inside = (domains) => new RegExp(String.raw`^https:\/\/(([a-z0-9-]+\.)*(${domains})|${AUTH})(\/|:|$)`, 'i');
+// Login oynasi (popup bo'lib ochiladi): Google/Microsoft/Apple yoki saytning o'z OAuth/login manzili
+const LOGIN_POPUP = /^https:\/\/(accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|appleid\.apple\.com)(\/|$)|\/(oauth2?|auth|login|signin|sign-in|sso)(\/|\?|$)/i;
 
 /**
  * Har bir AI: bosh sahifasi, panel ichida ochiladigan domenlar va chat maydonini topish uchun selektorlar.
@@ -36,6 +38,9 @@ const PROVIDERS = {
     url: 'https://claude.ai/new',
     inside: inside(String.raw`claude\.ai|anthropic\.com|claudeusercontent\.com`),
     editor: ['div.ProseMirror[contenteditable="true"]', 'div[contenteditable="true"]', 'textarea'],
+    // Claude dasturiy Ctrl+V dagi faylni qabul qilmaydi - o'zining "fayl yuklash" maydoni orqali beriladi
+    attach: 'input',
+    fileInput: ['input[data-testid="file-upload"]', 'input[type="file"]'],
   },
   deepseek: {
     url: 'https://chat.deepseek.com/',
@@ -43,7 +48,8 @@ const PROVIDERS = {
     editor: ['textarea#chat-input', 'textarea', 'div[contenteditable="true"]'],
   },
   kimi: {
-    url: 'https://www.kimi.com/',
+    // kimi.ai - xalqaro versiya (Google bilan kirish). kimi.com - Xitoy telefon raqami / WeChat bilan
+    url: 'https://www.kimi.ai/',
     inside: inside(String.raw`kimi\.com|kimi\.ai|moonshot\.cn|moonshot\.ai`),
     editor: ['.chat-input-editor[contenteditable="true"]', 'div[contenteditable="true"]', 'textarea'],
   },
@@ -68,10 +74,25 @@ const focusEditor = (p) => `(() => { const el = ${editorExpr(p)}; if (!el) retur
   const sel = window.getSelection(); const range = document.createRange();
   range.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(range); return true; })()`;
 
-/** Faylni biriktirish: xuddi foydalanuvchi faylni chatga Ctrl+V qilgandek. Fayl diskka yozilmaydi */
+/**
+ * Faylni biriktirish. Fayl diskka yozilmaydi.
+ *  - 'paste' (standart): xuddi foydalanuvchi faylni chatga Ctrl+V qilgandek;
+ *  - 'input': saytning o'z "fayl yuklash" maydoni orqali (xuddi 📎 bosib fayl tanlagandek).
+ *    Maydon topilmasa - 'paste' ga o'tiladi.
+ */
 const attachFile = (p, name, content) => `(() => { const el = ${editorExpr(p)}; if (!el) return 'no-editor';
   const file = new File([${JSON.stringify('﻿' + content)}], ${JSON.stringify(name)}, { type: 'text/csv' });
-  const dt = new DataTransfer(); dt.items.add(file); el.focus();
+  const dt = new DataTransfer(); dt.items.add(file);
+  if (${JSON.stringify(p.attach || 'paste')} === 'input') {
+    const inp = ${(p.fileInput || ['input[type="file"]']).map((s) => `document.querySelector(${JSON.stringify(s)})`).join(' || ')};
+    if (inp) {
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    }
+  }
+  el.focus();
   el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   return 'ok'; })()`;
 
@@ -82,8 +103,20 @@ function ensureView(id) {
     webPreferences: { partition: `persist:ai-${id}`, contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   const wc = view.webContents;
-  // Kirish oynalari (Google bilan kirish va h.k.) - panel ichida popup; boshqa havolalar - oddiy brauzerda
+  // Yangi oyna so'ralganda:
+  //  - login (Google bilan kirish va h.k.) - kichik popup oyna; u yopilganda panel yangilanadi (kirgan holat ko'rinsin);
+  //  - saytning o'z sahifasi (masalan "kimi.ai ga o'ting") - panelning o'zida ochiladi;
+  //  - boshqa havolalar - oddiy brauzerda.
+  wc.on('did-create-window', (child) => {
+    child.once('closed', () => {
+      if (!wc.isDestroyed()) wc.reload();
+    });
+  });
   wc.setWindowOpenHandler(({ url }) => {
+    if (p.inside.test(url) && !LOGIN_POPUP.test(url)) {
+      wc.loadURL(url);
+      return { action: 'deny' };
+    }
     if (p.inside.test(url)) {
       return {
         action: 'allow',
