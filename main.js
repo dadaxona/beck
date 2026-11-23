@@ -66,6 +66,10 @@ ipcMain.handle('printer:send', async (event, printer, data) => {
     return { printed: true };
 });
 
+// AI yordamchi (Gemini paneli) - butun kodi ai-panel.js da. O'chirish uchun shu 2 qatorni va createWindow dagi 1 qatorni olib tashlang
+const aiPanel = require('./ai-panel');
+aiPanel.setupAiPanel({ trusted });
+
 /** Server tayyor bo'lguncha ko'rinadigan oddiy sahifa (oq ekran o'rniga) */
 const statusPage = (text, isError = false) =>
     'data:text/html;charset=utf-8,' +
@@ -90,6 +94,7 @@ function createWindow() {
             sandbox: true,
         }
     });
+    aiPanel.attachWindow(mainWindow);
 
     // Avval "Yuklanmoqda", server (baza tekshiruvi) tayyor bo'lgach asosiy sahifa.
     // Ilgari oyna serverdan oldin ochilib, ulanolmay oq ekranda qolib ketardi.
