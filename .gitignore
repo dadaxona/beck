@@ -5,6 +5,7 @@
 /database/dev.sqlite
 # /public
 /text.txt
+/uploads
 /dist
 /.pnp
 .pnp.*
