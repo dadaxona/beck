@@ -8,12 +8,13 @@ contextBridge.exposeInMainWorld('desktopPrinter', {
   send: (printer, data) => ipcRenderer.invoke('printer:send', printer, data),
 });
 
-// AI yordamchi (Gemini paneli, ai-panel.js). Dastur faqat prompt va faylni qo'yadi - yuborishni foydalanuvchi o'zi bosadi
+// AI yordamchi (ai-panel.js). Dastur faqat prompt va faylni qo'yadi - yuborishni foydalanuvchi o'zi bosadi.
+// id: gemini | chatgpt | claude | deepseek | kimi
 contextBridge.exposeInMainWorld('desktopAI', {
-  /** Gemini panelini sahifadagi to'rtburchakka joylashtirish: { x, y, width, height } (CSS px) */
-  show: (bounds) => ipcRenderer.invoke('ai:show', bounds),
+  /** AI saytini sahifadagi to'rtburchakka joylashtirish: { x, y, width, height } (CSS px) */
+  show: (id, bounds) => ipcRenderer.invoke('ai:show', id, bounds),
   hide: () => ipcRenderer.invoke('ai:hide'),
-  home: () => ipcRenderer.invoke('ai:home'),
+  home: (id) => ipcRenderer.invoke('ai:home', id),
   /** { prompt, fileName, csv } - chatga prompt qo'yadi va CSV faylni biriktiradi */
-  attach: (data) => ipcRenderer.invoke('ai:attach', data),
+  attach: (id, data) => ipcRenderer.invoke('ai:attach', id, data),
 });
