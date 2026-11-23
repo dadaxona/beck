@@ -133,6 +133,33 @@ const exact = {
   "Omborlarni tanlang": "Выберите склады",
   "Qayerdan va qayerga omborlari bir xil bo'lishi mumkin emas": "Склады «откуда» и «куда» не могут совпадать",
   "Avval o'chirishga belgilang": "Сначала пометьте на удаление",
+
+  // Ko'p tashkilotli rejim
+  "Tashkilot (do'kon) nomini kiriting": "Введите название организации (магазина)",
+  "Parol kamida 4 belgidan iborat bo'lsin": "Пароль должен содержать не менее 4 символов",
+  "Tashkilot bloklangan": "Организация заблокирована",
+  "Juda ko'p urinish. 15 daqiqadan keyin qayta urinib ko'ring": "Слишком много попыток. Повторите через 15 минут",
+  "Bu bot boshqa tashkilotda ulangan. Boshqa bot yarating (@BotFather)": "Этот бот подключён в другой организации. Создайте другого бота (@BotFather)",
+  "Do'kon aniqlanmadi. Mini app'ni bot orqali oching": "Магазин не определён. Откройте mini app через бота",
+  "Do'kon topilmadi": "Магазин не найден",
+  "Rasmni 200 KB gacha kichraytirib bo'lmadi": "Не удалось уменьшить изображение до 200 КБ",
+  "Rasm hajmi 15 MB dan oshmasin": "Размер изображения не более 15 МБ",
+  "Boshqa tashkilot ma'lumotiga yozib bo'lmaydi": "Нельзя записывать в данные другой организации",
+  "Tashkilotni o'zgartirib bo'lmaydi": "Организацию изменить нельзя",
+  "Login 60 belgidan oshmasin": "Логин не должен превышать 60 символов",
+  "Sizdan ko'proq ruxsati bor foydalanuvchini o'zgartira olmaysiz": "Нельзя изменять пользователя с большими правами, чем у вас",
+  "O'zingizda yo'q ruxsatli rolni bera olmaysiz": "Нельзя назначить роль с правами, которых нет у вас",
+  "Tashkilot egasining roli yo'q: unda to'liq huquq bor": "У владельца организации нет роли: у него полный доступ",
+  "Tashkilot egasini bloklab bo'lmaydi": "Владельца организации нельзя заблокировать",
+  "Tashkilot egasini o'chirib bo'lmaydi": "Владельца организации нельзя удалить",
+  "Server rejimida chek printeri server orqali ishlamaydi: A4 yoki brauzer orqali chop eting": "В серверном режиме чековый принтер через сервер не работает: печатайте через A4 или браузер",
+  "Sizdan ko'proq ruxsati bor rolni o'zgartira olmaysiz": "Нельзя изменять роль с большими правами, чем у вас",
+  "Parol 200 belgidan oshmasin": "Пароль не должен превышать 200 символов",
+  "Juda ko'p urinish. Birozdan keyin urinib ko'ring": "Слишком много попыток. Повторите позже",
+  "Ro'yxatdan o'tish faqat dastur o'rnatilgan kompyuterdan mumkin": "Регистрация возможна только с компьютера, на котором установлена программа",
+  "Chek printeri faqat dastur o'rnatilgan kompyuterdan ishlaydi: A4 yoki brauzer orqali chop eting": "Чековый принтер работает только с компьютера, где установлена программа: печатайте через A4 или браузер",
+  "Investitsiya": "Инвестиции",
+  "To'lov turini (kassani) tanlang": "Выберите тип оплаты (кассу)",
 };
 
 // O'zgaruvchan qismli xabarlar (tartib muhim: aniqrog'i avval)
@@ -151,6 +178,8 @@ const patterns = [
   [/^Qaytarish soni sotilgan sondan oshib ketdi: (.*)$/, 'Количество возврата превышает проданное: $1'],
   [/^Qoldiq yetarli emas: (.*) \(bor: (.*)\)$/, 'Недостаточно остатка: $1 (есть: $2)'],
   [/^Qoldiq yetarli emas: (.*)$/, 'Недостаточно остатка: $1'],
+  [/^Bog'langan ma'lumot topilmadi \((.*)\)$/, "Связанные данные не найдены ($1)"],
+  [/^Bu (.*) investitsiya hujjati\. Uni Pul → Investitsiya bo'limida o'zgartiring$/, "Документ $1 — инвестиция. Изменяйте его в разделе Деньги → Инвестиции"],
 ];
 
 function translate(message) {

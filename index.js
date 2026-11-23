@@ -2,16 +2,21 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const router = require('./App/routes/router');
-const { sequelize, Warehouse, Contractor, CashDesk, CashArticle } = require('./models');
+const { sequelize } = require('./models');
 const { syncSchema } = require('./database/sync');
-const { ensureCategory: ensureBlacklistCategory } = require('./App/services/blacklist');
+const organizations = require('./App/services/organizations');
 const app = express();
 // Electron oynasi (main.js) va frontend (lib/config.ts) ham shu portga ulanadi. Testlar uchun PORT berish mumkin
 const port = Number(process.env.PORT) || 5678;
 const telegram = require('./App/services/telegram');
 const { UPLOADS_DIR } = require('./App/services/productImages');
 
-app.use(cors())
+// X-New-Token: avtomatik yangilangan token (doim tizimda qolish) - brauzer o'qiy olishi uchun ochiladi
+app.use(cors({ exposedHeaders: ['X-New-Token'] }))
+// Haqiqiy mijoz IP si (cheklovlar uchun): standart - faqat shu kompyuterdagi proksi/tunnel (nginx, cloudflared, ngrok)
+// sarlavhasiga ishoniladi. Boshqa sxemada: TRUST_PROXY=1 (proksilar soni) yoki IP/subnet ro'yxati.
+const trustProxy = process.env.TRUST_PROXY || 'loopback';
+app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy)
 app.use(express.json({ limit: '25mb' })) // Excel import fayli (base64) sig'ishi uchun
 app.use(express.urlencoded({ extended: false }))
 
@@ -60,22 +65,15 @@ const ready = new Promise((resolve, reject) => {
 });
 ready.catch(() => { }); // kutayotgan bo'lmasa "unhandled rejection" bo'lmasin
 
-syncSchema(sequelize) // jadvallar va yangi ustunlar modellardan avtomatik
-    .then(() => Warehouse.findOrCreate({ where: { name: 'Asosiy' } })) // standart ombor
-    .then(() => Contractor.findOrCreate({ where: { name: 'Chakana mijoz' }, defaults: { relation: 'B2C' } })) // sotuv oynasidagi standart mijoz
-    // standart kassalar va modda (ketma-ket: SQLite parallel transaction'ni qabul qilmaydi)
-    .then(() => CashDesk.findOrCreate({ where: { name: 'Naqd' } }))
-    .then(() => CashDesk.findOrCreate({ where: { name: 'Plastik' } }))
-    .then(() => CashDesk.findOrCreate({ where: { name: 'Bank' } }))
-    .then(() => CashArticle.findOrCreate({ where: { name: "To'lov" } }))
-    .then(() => ensureBlacklistCategory()) // "Qora ro'yxat" kategoriyasi; avval belgilanganlar ham unga tushadi
-    .then((cat) => Contractor.update({ categoryId: cat.id }, { where: { blacklisted: true } }))
+syncSchema(sequelize) // jadvallar, yangi ustunlar va ko'p tashkilotli rejimga o'tish (eski ma'lumot 1-tashkilotga)
+    // har bir tashkilotning standart yozuvlari: ombor, "Chakana mijoz", kassalar, modda, "Qora ro'yxat"
+    .then(() => organizations.ensureAllDefaults())
     .then(() => {
         const server = app.listen(port, () => {
             console.log(`Example app listening on port ${port}`);
             markReady(port);
             // Telegram botlari (sozlangan bo'lsa) ulanadi
-            telegram.apply().catch((err) => console.error('Telegram:', err.message));
+            telegram.applyAll().catch((err) => console.error('Telegram:', err.message));
         });
         server.on('error', (err) => markFailed(err)); // masalan: port band (dastur ikkinchi marta ochilgan)
     })

@@ -18,6 +18,8 @@ if (!app.requestSingleInstanceLock()) {
 if (process.platform === 'win32') app.setAppUserModelId('com.2C');
 const ICON = path.join(__dirname, 'icon.ico');
 
+// JWT kaliti har bir kompyuterning o'zida (dastur papkasida emas): o'rnatuvchiga tushib, hamma joyda bir xil bo'lib qolmasin
+process.env.JWT_SECRET_FILE = process.env.JWT_SECRET_FILE || path.join(app.getPath('userData'), '.jwt-secret');
 const server = require('./index.js');
 // USB printer (XP-80) uchun yordamchi DLL dastur papkasida bir marta yaratiladi
 require('./App/printing/windows').setHelperDir(app.getPath('userData'));

@@ -16,6 +16,7 @@
  */
 
 const ExcelJS = require('exceljs');
+const numbering = require('./numbering');
 const {
   sequelize, Product, ProductCategory, StockBalance, Receipt, ReceiptItem, Warehouse,
 } = require('../../models');
@@ -292,7 +293,7 @@ async function apply(p, warehouseId, userId) {
         },
         { transaction: t },
       );
-      await doc.update({ number: `${prefix}-${doc.id}` }, { transaction: t });
+      await doc.update({ number: `${prefix}-${await numbering.next('Receipt', t)}` }, { transaction: t });
       await ReceiptItem.bulkCreate(lines.map((l) => ({ ...l, receiptId: doc.id })), { transaction: t });
       created.push(doc.number);
     }

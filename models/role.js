@@ -3,8 +3,11 @@
 module.exports = (sequelize, DataTypes) => {
   // Rol: qaysi bo'limlarga kirish va qanday amallar mumkinligi. permissions = { bo'lim: ['view', 'create', ...] }
   const Role = sequelize.define('Role', {
-    name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    name: { type: DataTypes.STRING, allowNull: false },
     permissions: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
+  }, {
+    // Tashkilot ichida noyob (har mijozda o'z "name" lari)
+    indexes: [{ unique: true, fields: ['organizationId', 'name'] }],
   });
 
   Role.associate = (db) => {

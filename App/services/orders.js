@@ -5,6 +5,7 @@
  * sotuv faqat kompyuterdagi Sotuv oynasida kassir tomonidan qilinadi.
  */
 const { sequelize, Order, OrderItem, Product, Contractor, User, StockBalance } = require('../../models');
+const numbering = require('./numbering');
 const { fn, col } = require('sequelize');
 const { today } = require('../utils/date');
 const currencies = require('./currencies');
@@ -122,7 +123,7 @@ async function create(input) {
       },
       { transaction: t },
     );
-    await record.update({ number: `Z-${record.id}` }, { transaction: t });
+    await record.update({ number: `Z-${await numbering.next('Order', t)}` }, { transaction: t });
     await OrderItem.bulkCreate(lines.map((l) => ({ ...l, orderId: record.id })), { transaction: t });
     return record.id;
   });

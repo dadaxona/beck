@@ -142,7 +142,8 @@ exports.assign = async (req, res) => {
 exports.uploadImage = async (req, res) => {
   const product = await Product.findByPk(req.params.id);
   if (!product) return res.status(404).json({ message: 'Tovar topilmadi' });
-  const url = images.save(product.id, (req.body || {}).data);
+  // sharp: 200 KB dan kichik rasm o'zgarishsiz, kattasi 200 KB gacha siqiladi
+  const url = await images.save(product.id, (req.body || {}).data);
   const old = product.image;
   await product.update({ image: url });
   images.remove(old);

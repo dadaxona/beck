@@ -1,4 +1,5 @@
 const { Op } = require('sequelize');
+const numbering = require('../services/numbering');
 const { sequelize, StockTransfer, StockTransferItem, StockBalance, Product, Warehouse, User } = require('../../models');
 const { today } = require('../utils/date');
 const { EPS, roundQty } = require('../utils/qty');
@@ -96,7 +97,7 @@ exports.create = async (req, res) => {
       { date, comment: String(b.comment || '').slice(0, 1000), fromWarehouseId: fromId, toWarehouseId: toId, userId: req.user.id },
       { transaction: t },
     );
-    await doc.update({ number: `KO-${doc.id}` }, { transaction: t });
+    await doc.update({ number: `KO-${await numbering.next('StockTransfer', t)}` }, { transaction: t });
     await StockTransferItem.bulkCreate(items.map((i) => ({ ...i, transferId: doc.id })), { transaction: t });
     return doc.id;
   });

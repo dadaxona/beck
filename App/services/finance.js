@@ -91,6 +91,10 @@ async function loadData(currency) {
     services: services.map((p) => ({ date: p.date, total: to(p.total, p) })),
     cashOther: cashOther.map((c) => ({ date: c.date, type: c.type, cashAmount: to(c.cashAmount, c) })),
     receiptExtras: receiptExtras.map((r) => ({ date: r.date, extraTotal: to(r.extraTotal, r) })),
+    // Investitsiya (tashqaridan kiritilgan pul): daromad emas - foydaga kirmaydi, faqat ma'lumot uchun
+    investments: (
+      await CashDocument.findAll({ where: { posted: true, partyType: 'investment' }, attributes: ['date', 'cashAmount', 'currency', 'rate'], raw: true })
+    ).map((c) => ({ date: c.date, amount: to(c.cashAmount, c) })),
     writeOffs: writeOffs.map((w) => ({ date: w.date, loss: to(Math.max(w.quantity - (backQty.get(w.id) || 0), 0) * w.costPrice, w) })),
   };
 }
@@ -135,6 +139,7 @@ function summarize(data, from, to) {
       total: round(expenses),
     },
     otherIncome: round(otherIncome),
+    investments: round(sum((data.investments || []).filter((c) => inRange(c.date, from, to)), (c) => c.amount)),
     netProfit: round(netProfit),
     unpaid: round(unpaid),
     cashProfit: round(netProfit - unpaid),

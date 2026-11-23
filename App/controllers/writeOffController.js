@@ -1,4 +1,5 @@
 const { sequelize, WriteOff, WriteOffReturn, Product, StockBalance, Warehouse, User } = require('../../models');
+const numbering = require('../services/numbering');
 const currencies = require('../services/currencies');
 const { today } = require('../utils/date');
 const { EPS, roundQty } = require('../utils/qty');
@@ -76,7 +77,7 @@ exports.create = async (req, res) => {
       },
       { transaction: t },
     );
-    await doc.update({ number: `SP-${doc.id}` }, { transaction: t });
+    await doc.update({ number: `SP-${await numbering.next('WriteOff', t)}` }, { transaction: t });
     return doc.id;
   });
 

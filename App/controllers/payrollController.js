@@ -1,4 +1,5 @@
 const { sequelize, Payroll, PayrollItem, Contractor, User } = require('../../models');
+const numbering = require('../services/numbering');
 const currencies = require('../services/currencies');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -52,7 +53,7 @@ async function save(req, existing) {
       await doc.update({ ...data, number: b.number || doc.number }, { transaction: t });
     } else {
       doc = await Payroll.create({ ...data, number: b.number || '', userId: req.user.id }, { transaction: t });
-      if (!doc.number) await doc.update({ number: `OH-${doc.id}` }, { transaction: t });
+      if (!doc.number) await doc.update({ number: `OH-${await numbering.next('Payroll', t)}` }, { transaction: t });
     }
     await PayrollItem.bulkCreate(items.map((i) => ({ ...i, payrollId: doc.id })), { transaction: t });
     return doc.id;

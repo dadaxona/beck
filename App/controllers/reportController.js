@@ -1,6 +1,7 @@
 const { Contractor, Category } = require('../../models');
 const ledger = require('../services/ledger');
 const finance = require('../services/finance');
+const { employeeIds } = require('../services/employees');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -27,13 +28,15 @@ exports.dashboard = async (req, res) => {
   res.json(await finance.dashboard(req.query.currency || 'UZS'));
 };
 
-// Debitorlar / Kreditorlar: ?type=debtors|creditors&date=YYYY-MM-DD&currency=UZS&categoryId=
+// Debitorlar / Kreditorlar: ?type=debtors|creditors&date=YYYY-MM-DD&currency=UZS&categoryId=&group=all|employees|clients
+// group: barchasi / faqat xodimlar / xodimlarsiz (mijozlar va boshqa kontragentlar). Har uchala guruh jami ham qaytadi.
 // Debitor = kontragent bizga qarzdor (balans < 0), Kreditor = biz qarzdormiz (balans > 0).
 exports.debtors = async (req, res) => {
   const type = req.query.type === 'creditors' ? 'creditors' : 'debtors';
   const currency = req.query.currency || 'UZS';
   const date = req.query.date || null;
   const categoryId = req.query.categoryId ? Number(req.query.categoryId) : null;
+  const group = ['employees', 'clients'].includes(req.query.group) ? req.query.group : 'all';
 
   const balances = await ledger.balancesByContractor(currency, date);
   const ids = Object.keys(balances)
@@ -50,7 +53,8 @@ exports.debtors = async (req, res) => {
       })
     : [];
 
-  const rows = contractors
+  const staff = await employeeIds();
+  const all = contractors
     .map((c) => ({
       id: c.id,
       name: c.name,
@@ -58,8 +62,25 @@ exports.debtors = async (req, res) => {
       guarantor: c.guarantor,
       category: c.category ? c.category.name : '',
       amount: Math.abs(balances[c.id]),
+      employee: staff.has(c.id),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const total = Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
-  res.json({ type, currency, date, rows, total });
+  const sumOf = (list) => Math.round(list.reduce((s, r) => s + r.amount, 0) * 100) / 100;
+  const employees = all.filter((r) => r.employee);
+  const clients = all.filter((r) => !r.employee);
+  const rows = group === 'employees' ? employees : group === 'clients' ? clients : all;
+  res.json({
+    type,
+    currency,
+    date,
+    group,
+    rows,
+    total: sumOf(rows),
+    // Uchala hisob: barchasi, faqat xodimlar, xodimlarsiz
+    totals: {
+      all: { total: sumOf(all), count: all.length },
+      employees: { total: sumOf(employees), count: employees.length },
+      clients: { total: sumOf(clients), count: clients.length },
+    },
+  });
 };

@@ -5,6 +5,13 @@ const receiptSettings = require('../services/receiptSettings');
 const { loadDoc } = require('./saleController');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
+const { canPrintOnServer } = require('../../config/runtime');
+
+/**
+ * Server rejimida (internetdagi ko'p tashkilotli server) server printerga ulanmaydi: mijozning printeri serverdan
+ * ko'rinmaydi, ixtiyoriy IP:port ga ulanish esa xavfsizlik teshigi (SSRF). Chek A4 / brauzer orqali chop etiladi.
+ */
+const SERVER_PRINT_OFF = "Chek printeri faqat dastur o'rnatilgan kompyuterdan ishlaydi: A4 yoki brauzer orqali chop eting";
 
 const configured = (p) => (p.type === 'network' ? !!p.host : !!p.printerName);
 
@@ -23,6 +30,7 @@ exports.saveSettings = async (req, res) => {
 
 // GET /print/printers - Windows'dagi printerlar (USB printer drayveri o'rnatilgan bo'lishi kerak)
 exports.printers = async (req, res) => {
+  if (!canPrintOnServer(req)) return res.json([]);
   res.json(await printing.listPrinters());
 };
 
@@ -35,6 +43,7 @@ exports.preview = async (req, res) => {
 // POST /print/test { settings? } - sinov cheki (saqlanmagan sozlamalar bilan ham sinash mumkin)
 exports.test = async (req, res) => {
   const settings = req.body?.settings ? receiptSettings.sanitize(req.body.settings) : await receiptSettings.get();
+  if (!canPrintOnServer(req)) throw fail(400, SERVER_PRINT_OFF);
   if (!configured(settings.printer)) throw fail(400, 'Printer tanlanmagan');
   try {
     await printing.send(settings.printer, renderTest(settings));
@@ -49,6 +58,10 @@ exports.sale = async (req, res) => {
   const auto = req.query.auto === '1';
   const settings = await receiptSettings.get();
   if (auto && !settings.printer.autoPrint) return res.json({ printed: false, reason: 'off' });
+  if (!canPrintOnServer(req)) {
+    if (auto) return res.json({ printed: false, reason: 'server-mode' });
+    throw fail(400, SERVER_PRINT_OFF);
+  }
   if (!configured(settings.printer)) {
     if (auto) return res.json({ printed: false, reason: 'not-configured' });
     throw fail(400, "Printer sozlanmagan: Sozlamalar → Chek va printer bo'limida printerni tanlang");

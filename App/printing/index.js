@@ -8,17 +8,23 @@
 const { execFile } = require('child_process');
 const { sendNetwork } = require('./network');
 const { sendWindows } = require('./windows');
+const { currentOrg } = require('../../database/tenant');
 
-let queue = Promise.resolve();
+// Navbat har bir tashkilot uchun alohida: bir tashkilotning printeri osilib qolsa, boshqalariniki kutib qolmaydi
+const queues = new Map();
 
 /** printer: { type: 'usb' | 'network', printerName, host, port } */
 function send(printer, data) {
+  const key = currentOrg() || 0;
   const run = () =>
     printer.type === 'network'
       ? sendNetwork({ host: printer.host, port: printer.port }, data)
       : sendWindows({ printerName: printer.printerName }, data);
-  const next = queue.catch(() => {}).then(run);
-  queue = next;
+  const next = (queues.get(key) || Promise.resolve()).catch(() => {}).then(run);
+  queues.set(key, next);
+  next.catch(() => {}).finally(() => {
+    if (queues.get(key) === next) queues.delete(key);
+  });
   return next;
 }
 

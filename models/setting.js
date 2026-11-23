@@ -3,8 +3,11 @@
 // Dastur sozlamalari (kalit -> JSON qiymat). Masalan "receipt": chek va printer sozlamalari
 module.exports = (sequelize, DataTypes) => {
   const Setting = sequelize.define('Setting', {
-    key: { type: DataTypes.STRING, allowNull: false, unique: true },
+    key: { type: DataTypes.STRING, allowNull: false },
     value: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
+  }, {
+    // Tashkilot ichida noyob (har mijozda o'z "key" lari)
+    indexes: [{ unique: true, fields: ['organizationId', 'key'] }],
   });
   return Setting;
 };

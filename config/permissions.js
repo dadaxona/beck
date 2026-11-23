@@ -23,6 +23,7 @@ const SECTIONS = {
   receipts: ['view', 'create', 'edit', 'delete', 'purge'],
   cash: ['view', 'create', 'edit', 'delete', 'purge'],
   payroll: ['view', 'create', 'edit', 'delete', 'purge'],
+  investments: ['view', 'create', 'delete', 'purge'], // investitsiya: tashqaridan kiritilgan pul (kassaga)
   writeoffs: ['view', 'create', 'edit', 'delete', 'purge'], // edit = qaytarish
   transfers: ['view', 'create', 'delete', 'purge'], // ombordan omborga ko'chirish
   reconciliation: ['view'],
@@ -57,7 +58,7 @@ function sanitize(input) {
  * Xodimlar mini app'i uchun ruxsatlar: sotuv (va sotuvga o'xshash pul/ombor hujjatlarini yaratish) hech qachon
  * mumkin emas, faqat ko'rish va zakaz berish. Obyektni joyida o'zgartiradi.
  */
-const MINIAPP_READONLY = ['sales', 'sales-journal', 'basket', 'returns', 'receipts', 'cash', 'payroll', 'writeoffs', 'transfers', 'settings'];
+const MINIAPP_READONLY = ['sales', 'sales-journal', 'basket', 'returns', 'receipts', 'cash', 'payroll', 'investments', 'writeoffs', 'transfers', 'settings'];
 function forMiniApp(perms) {
   for (const section of MINIAPP_READONLY) {
     if (!perms[section]) continue;

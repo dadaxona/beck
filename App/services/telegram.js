@@ -2,26 +2,32 @@
 
 /**
  * Telegram botlari (mijozlar va xodimlar). Webhook emas, long polling (getUpdates) ishlatiladi:
- * dastur lokal kompyuterda turadi, Telegram'ga faqat chiquvchi so'rov kerak.
+ * dastur lokal kompyuterda ham turishi mumkin, Telegram'ga faqat chiquvchi so'rov kerak.
+ *
+ * Ko'p tashkilotli rejim: HAR BIR tashkilotning o'z botlari bor (Sozlamalar → Telegram). Holat va sozlamalar
+ * tashkilot bo'yicha alohida saqlanadi. Mini app manzili tashkilot raqami bilan: {publicUrl}/shop?o=<orgId>.
  *
  * Bot ulanganda mini app avtomatik ulanadi:
- *  - chat menyusidagi tugma (setChatMenuButton) mini app'ni ochadi: {publicUrl}/shop yoki {publicUrl}/agent
+ *  - chat menyusidagi tugma (setChatMenuButton) mini app'ni ochadi
  *  - /start ga salom xabari va mini app'ni ochadigan tugma bilan javob beriladi
  *
- * Mini app'dan kelgan so'rovlar initData imzosi bot tokeni bilan tekshiriladi (verifyInitData).
+ * Mini app'dan kelgan so'rovlar initData imzosi o'sha tashkilot botining tokeni bilan tekshiriladi (verifyInitData).
  */
 const crypto = require('crypto');
 const settings = require('./telegramSettings');
+const { Organization } = require('../../models');
+const { currentOrg, runWithOrg } = require('../../database/tenant');
 
 const KINDS = ['client', 'employee'];
 const PATHS = { client: '/shop', employee: '/agent' };
 
-// Har bir bot holati: ishlayaptimi, username, oxirgi xato
-const state = {
-  client: { running: false, username: '', error: '', loop: null },
-  employee: { running: false, username: '', error: '', loop: null },
+/** Tashkilot bo'yicha: { orgId -> { current: sozlamalar, client: holat, employee: holat } } */
+const orgs = new Map();
+const emptyState = () => ({ running: false, username: '', error: '', loop: null });
+const slot = (orgId) => {
+  if (!orgs.has(orgId)) orgs.set(orgId, { current: null, client: emptyState(), employee: emptyState() });
+  return orgs.get(orgId);
 };
-let current = null; // oxirgi qo'llangan sozlamalar
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -41,14 +47,16 @@ async function call(token, method, params = {}, signal) {
   return data.result;
 }
 
-const appUrl = (s, kind) => `${s.publicUrl}${PATHS[kind]}`;
+/** Mini app manzili: tashkilot raqami bilan (mini app qaysi do'konniki ekanini shundan biladi) */
+const appUrl = (s, kind, orgId) => `${s.publicUrl}${PATHS[kind]}?o=${orgId}`;
 
 /** Bitta botning polling sikli. stop() chaqirilguncha ishlaydi. */
-function startLoop(kind, s) {
+function startLoop(orgId, kind, s) {
   const bot = s[kind];
   const controller = new AbortController();
-  const st = state[kind];
+  const st = slot(orgId)[kind];
   let stopped = false;
+  const tag = `Telegram #${orgId} (${kind})`;
 
   const run = async () => {
     try {
@@ -58,7 +66,7 @@ function startLoop(kind, s) {
       await call(bot.token, 'deleteWebhook', {}, controller.signal);
       // Mini app tugmasi (chat pastidagi menyu tugmasi)
       await call(bot.token, 'setChatMenuButton', {
-        menu_button: { type: 'web_app', text: bot.buttonText, web_app: { url: appUrl(s, kind) } },
+        menu_button: { type: 'web_app', text: bot.buttonText, web_app: { url: appUrl(s, kind, orgId) } },
       }, controller.signal);
       await call(bot.token, 'setMyCommands', {
         commands: [{ command: 'start', description: bot.buttonText }],
@@ -69,7 +77,7 @@ function startLoop(kind, s) {
       if (stopped) return;
       st.running = false;
       st.error = err.message;
-      console.error(`Telegram (${kind}) ulanmadi:`, err.message);
+      console.error(`${tag} ulanmadi:`, err.message);
       // Token noto'g'ri bo'lsa qayta urinmaymiz; tarmoq xatosida keyinroq qayta urinamiz
       if (err.code === 401 || err.code === 404) return;
       await sleep(15000);
@@ -85,7 +93,7 @@ function startLoop(kind, s) {
         st.error = '';
         for (const u of updates) {
           offset = u.update_id + 1;
-          handleUpdate(kind, s, u).catch((err) => console.error(`Telegram (${kind}) javob xatosi:`, err.message));
+          handleUpdate(orgId, kind, s, u).catch((err) => console.error(`${tag} javob xatosi:`, err.message));
         }
       } catch (err) {
         if (stopped) break;
@@ -110,7 +118,7 @@ function startLoop(kind, s) {
   };
 }
 
-async function handleUpdate(kind, s, update) {
+async function handleUpdate(orgId, kind, s, update) {
   const msg = update.message;
   if (!msg || !msg.chat || typeof msg.text !== 'string') return;
   const bot = s[kind];
@@ -118,38 +126,61 @@ async function handleUpdate(kind, s, update) {
     await call(bot.token, 'sendMessage', {
       chat_id: msg.chat.id,
       text: bot.welcome,
-      reply_markup: { inline_keyboard: [[{ text: bot.buttonText, web_app: { url: appUrl(s, kind) } }]] },
+      reply_markup: { inline_keyboard: [[{ text: bot.buttonText, web_app: { url: appUrl(s, kind, orgId) } }]] },
     });
   }
 }
 
-/** Sozlamalarni qo'llaydi: o'zgargan botlarni qayta ishga tushiradi, o'chirilganlarini to'xtatadi */
+/**
+ * JORIY tashkilot sozlamalarini qo'llaydi: o'zgargan botlarni qayta ishga tushiradi, o'chirilganlarini to'xtatadi.
+ * Tashkilot kontekstida chaqiriladi.
+ */
 async function apply({ force = false } = {}) {
+  const orgId = currentOrg();
+  const sl = slot(orgId);
   const s = await settings.get();
+  const current = sl.current;
   for (const kind of KINDS) {
     const bot = s[kind];
     const prev = current && current[kind];
     const same =
       prev && current.publicUrl === s.publicUrl && prev.token === bot.token && prev.enabled === bot.enabled &&
       prev.buttonText === bot.buttonText && prev.welcome === bot.welcome;
-    if (!force && same && (state[kind].loop || !bot.enabled)) continue;
+    const st = sl[kind];
+    if (!force && same && (st.loop || !bot.enabled)) continue;
 
-    if (state[kind].loop) {
-      state[kind].loop.stop();
-      state[kind].loop = null;
+    if (st.loop) {
+      st.loop.stop();
+      st.loop = null;
     }
-    state[kind].error = '';
-    state[kind].username = '';
-    if (bot.enabled && bot.token && s.publicUrl) state[kind].loop = startLoop(kind, s);
+    st.error = '';
+    st.username = '';
+    if (bot.enabled && bot.token && s.publicUrl) st.loop = startLoop(orgId, kind, s);
   }
-  current = s;
+  sl.current = s;
 }
 
+/** Ishga tushganda: barcha faol tashkilotlarning botlari */
+async function applyAll() {
+  const list = await Organization.findAll({ where: { active: true }, attributes: ['id'] });
+  for (const org of list) {
+    await runWithOrg(org.id, () => apply()).catch((err) => console.error(`Telegram #${org.id}:`, err.message));
+  }
+}
+
+/** Joriy tashkilot botlarining holati */
 function status() {
+  const orgId = currentOrg();
+  const sl = slot(orgId);
   const out = {};
   for (const kind of KINDS) {
-    const st = state[kind];
-    out[kind] = { running: st.running, username: st.username, error: st.error, url: current && current.publicUrl ? appUrl(current, kind) : '' };
+    const st = sl[kind];
+    out[kind] = {
+      running: st.running,
+      username: st.username,
+      error: st.error,
+      url: sl.current && sl.current.publicUrl ? appUrl(sl.current, kind, orgId) : '',
+    };
   }
   return out;
 }
@@ -183,10 +214,16 @@ function verifyInitData(initData, token, maxAgeSec = 7 * 24 * 3600) {
   return { user, authDate };
 }
 
-/** Mijozga bot orqali xabar (zakaz qabul qilindi va h.k.). Xato bo'lsa jim o'tadi. */
+/** Joriy tashkilot sozlamalari (mini app so'rovlarini tekshirish uchun). Tashkilot kontekstida. */
+const config = async () => {
+  const sl = slot(currentOrg());
+  return sl.current || (await settings.get());
+};
+
+/** Joriy tashkilot boti orqali mijozga xabar (zakaz qabul qilindi va h.k.). Xato bo'lsa jim o'tadi. */
 async function notify(kind, chatId, text) {
   try {
-    const s = current || (await settings.get());
+    const s = await config();
     const bot = s[kind];
     if (!bot.enabled || !bot.token || !chatId) return;
     await call(bot.token, 'sendMessage', { chat_id: chatId, text });
@@ -195,7 +232,4 @@ async function notify(kind, chatId, text) {
   }
 }
 
-/** Joriy sozlamalar (mini app so'rovlarini tekshirish uchun) */
-const config = async () => current || (await settings.get());
-
-module.exports = { apply, status, verifyInitData, notify, config };
+module.exports = { apply, applyAll, status, verifyInitData, notify, config };

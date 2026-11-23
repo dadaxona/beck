@@ -1,4 +1,5 @@
 const { Op } = require('sequelize');
+const numbering = require('../services/numbering');
 const {
   sequelize,
   CashDesk,
@@ -59,6 +60,9 @@ async function normalize(b, type, existing) {
 
 /** Kirim hujjatining "To'langan summa"sidan yaratilgan kassa hujjati faqat kirim orqali o'zgaradi */
 async function assertNotLinked(doc) {
+  if (doc.partyType === 'investment') {
+    throw fail(400, `Bu ${doc.number} investitsiya hujjati. Uni Pul → Investitsiya bo'limida o'zgartiring`);
+  }
   const receipt = await Receipt.findOne({ where: { cashDocumentId: doc.id }, attributes: ['number'] });
   if (receipt) {
     throw fail(400, `Bu to'lov ${receipt.number} kirim hujjatidan avtomatik yaratilgan. Uni kirim hujjatida o'zgartiring`);
@@ -115,7 +119,7 @@ async function save(req, existing) {
       await doc.update({ ...data, number: b.number || doc.number }, { transaction: t });
     } else {
       doc = await CashDocument.create({ ...data, type, number: b.number || '', userId: req.user.id }, { transaction: t });
-      if (!doc.number) await doc.update({ number: `${PREFIX[type]}-${doc.id}` }, { transaction: t });
+      if (!doc.number) await doc.update({ number: `${PREFIX[type]}-${await numbering.next('CashDocument', t)}` }, { transaction: t });
     }
 
     await assertNonNegative(pairs, t);
@@ -195,6 +199,7 @@ exports.remove = async (req, res) => {
 exports.restore = async (req, res) => {
   const doc = await CashDocument.findByPk(req.params.id);
   if (!doc) return res.status(404).json({ message: 'Hujjat topilmadi' });
+  await assertNotLinked(doc);
   await doc.update({ deleted: false });
   res.json({ ok: true });
 };

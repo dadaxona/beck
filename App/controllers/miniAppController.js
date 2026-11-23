@@ -7,6 +7,9 @@ const orders = require('../services/orders');
 const receiptSettings = require('../services/receiptSettings');
 const { money } = require('../utils/money');
 const currencies = require('../services/currencies');
+const { verifyPassword, hashPassword, needsRehash } = require('../utils/password');
+const { Limiter, normLogin, clientIp, loginGuard } = require('../utils/rateLimit');
+const { currentOrg } = require('../../database/tenant');
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const initDataOf = (req) => req.headers['x-telegram-init-data'] || (req.body && req.body.initData) || '';
@@ -31,15 +34,26 @@ const shopName = async () => {
   return layout.shopName.trim() || "Do'kon";
 };
 
+/**
+ * Do'kon (katalog) faqat egasi Sozlamalar → Telegram da mijozlar botini YOQGAN tashkilotda ochiq.
+ * Aks holda tashkilot raqamini (?o=) taxmin qilib, istalgan mijozning tovarlari va qoldiqlarini ko'rib bo'lardi.
+ */
+async function assertShopOpen() {
+  const s = await telegram.config();
+  if (!s.client.enabled || !s.client.token) throw fail(503, 'Internet magazin hozircha yopiq');
+  return s;
+}
+
 // GET /mini/shop/info - do'kon nomi va kategoriyalar
 exports.shopInfo = async (req, res) => {
-  const s = await telegram.config();
+  const s = await assertShopOpen();
   const categories = await ProductCategory.findAll({ attributes: ['id', 'name'], order: [['name', 'ASC']] });
   res.json({ name: await shopName(), open: !!(s.client.enabled && s.client.token), categories });
 };
 
 // GET /mini/shop/products - sotuvdagi tovarlar (faqat sotish narxi; tannarx/diller narxi ko'rsatilmaydi)
 exports.shopProducts = async (req, res) => {
+  await assertShopOpen();
   const products = await Product.findAll({
     where: { deleted: false, retailPrice: { [Op.gt]: 0 } },
     attributes: ['id', 'name', 'retailPrice', 'currency', 'unit', 'image', 'categoryId'],
@@ -52,19 +66,15 @@ exports.shopProducts = async (req, res) => {
   res.json(
     products.map((p) => {
       const qty = stock.get(p.id) || 0;
-      return { id: p.id, name: p.name, price: uzs(p), unit: p.unit, image: p.image, categoryId: p.categoryId, available: qty > 0, stock: Math.max(0, qty) };
+      return { id: p.id, name: p.name, price: uzs(p), unit: p.unit, image: p.image, categoryId: p.categoryId, available: qty > 0, stock: Math.min(9999, Math.max(0, qty)) };
     }),
   );
 };
 
-// Oddiy himoya: bir mijoz soatiga ko'pi bilan 15 ta zakaz
-const recent = new Map();
+// Oddiy himoya: bir mijoz bir do'konga soatiga ko'pi bilan 15 ta zakaz (xotira cheklangan)
+const orderLimit = new Limiter({ windowMs: 3600_000, max: 15 });
 function rateLimit(key) {
-  const now = Date.now();
-  const list = (recent.get(key) || []).filter((t) => now - t < 3600_000);
-  if (list.length >= 15) throw fail(429, "Juda ko'p zakaz. Birozdan keyin urinib ko'ring");
-  list.push(now);
-  recent.set(key, list);
+  if (!orderLimit.allow(`${currentOrg()}:${key}`)) throw fail(429, "Juda ko'p zakaz. Birozdan keyin urinib ko'ring");
 }
 
 // POST /mini/shop/orders { name, phone, address, comment, items: [{ productId, quantity }] }
@@ -123,7 +133,21 @@ async function employeeTg(req) {
 }
 
 const signMini = (user, tgId) =>
-  jwt.sign({ id: user.id, login: user.login, name: user.name, src: 'miniapp', tg: String(tgId) }, JWT_SECRET, { expiresIn: '30d' });
+  jwt.sign(
+    { id: user.id, login: user.login, name: user.name, src: 'miniapp', tg: String(tgId), org: user.organizationId, v: user.tokenVersion || 0 },
+    JWT_SECRET,
+    { expiresIn: '30d' },
+  );
+
+/*
+ * Xodim login'i (mini app) - parol tanlab ko'rishdan himoya, 15 daqiqa oynasi:
+ * tashkilot + login: 10 ta, Telegram akkaunt: 20 ta, IP: 100 ta. Urinish so'rov boshida yoziladi.
+ */
+const AGENT_WINDOW = 15 * 60 * 1000;
+const agentByLogin = new Limiter({ windowMs: AGENT_WINDOW, max: 10 });
+const agentByTg = new Limiter({ windowMs: AGENT_WINDOW, max: 20 });
+const agentByIp = new Limiter({ windowMs: AGENT_WINDOW, max: 100 });
+const agentByLoginGlobal = new Limiter({ windowMs: AGENT_WINDOW, max: 30 });
 
 // POST /mini/agent/session { initData } - Telegram akkaunti bog'langan bo'lsa darhol kiradi
 exports.agentSession = async (req, res) => {
@@ -139,9 +163,26 @@ exports.agentLogin = async (req, res) => {
   const tg = await employeeTg(req);
   const { login, password } = req.body || {};
   if (!login || !password) throw fail(400, 'Login va parol kiritilishi shart');
+  if (String(login).length > 60 || String(password).length > 200) throw fail(401, "Login yoki parol noto'g'ri");
+  // Telegram akkaunt bo'yicha (bitta akkauntdan ko'p loginni sinab bo'lmasin) + IP/login himoyasi
+  const tgKey = `${currentOrg()}|tg:${tg.id}`;
+  if (agentByTg.count(tgKey) >= agentByTg.max) throw fail(429, "Juda ko'p urinish. 15 daqiqadan keyin qayta urinib ko'ring");
+  const attempt = loginGuard({
+    ip: clientIp(req),
+    ipLimiter: agentByIp,
+    loginIpLimiter: agentByLogin,
+    loginLimiter: agentByLoginGlobal,
+    loginKey: `${currentOrg()}|${normLogin(login)}`,
+  });
+  if (!attempt.allowed) throw fail(429, "Juda ko'p urinish. 15 daqiqadan keyin qayta urinib ko'ring");
+  agentByTg.hit(tgKey);
+  // Faqat SHU tashkilot xodimlari (tenant filtr): boshqa do'kon xodimi bu bot orqali kira olmaydi
   const user = await User.findOne({ where: { login: String(login).trim() } });
-  if (!user || user.password !== password) throw fail(401, "Login yoki parol noto'g'ri");
+  if (!user || !(await verifyPassword(password, user.password))) throw fail(401, "Login yoki parol noto'g'ri");
   if (!user.active) throw fail(403, 'Bu foydalanuvchi bloklangan');
+  if (needsRehash(user.password)) await user.update({ password: await hashPassword(password) });
+  attempt.success();
+  agentByTg.reset(tgKey);
   // Bitta Telegram akkaunt faqat bitta foydalanuvchiga bog'lanadi
   await User.update({ telegramId: null }, { where: { telegramId: String(tg.id), id: { [Op.ne]: user.id } } });
   await user.update({ telegramId: String(tg.id) });

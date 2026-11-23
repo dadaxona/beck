@@ -43,3 +43,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /uploads
+/database/.jwt-secret
+/database/*.sqlite-wal
+/database/*.sqlite-shm

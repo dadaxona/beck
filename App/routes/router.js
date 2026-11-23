@@ -20,6 +20,7 @@ const orderController = require('../controllers/orderController')
 const telegramController = require('../controllers/telegramController')
 const currencyController = require('../controllers/currencyController')
 const transferController = require('../controllers/transferController')
+const investmentController = require('../controllers/investmentController')
 const auth = require('../middlewares/auth')
 const { permit, permitAny } = require('../middlewares/permit')
 const router = Router();
@@ -87,6 +88,13 @@ router.get('/currencies', currencyController.list)
 router.post('/currencies', permit('settings', 'edit'), currencyController.create)
 router.put('/currencies/:code', permit('settings', 'edit'), currencyController.update)
 router.delete('/currencies/:code', permit('settings', 'edit'), currencyController.remove)
+
+// Investitsiya: tashqaridan kiritilgan pul (kontragentsiz, to'g'ridan-to'g'ri kassaga)
+router.get('/investments', permit('investments'), investmentController.list)
+router.post('/investments', permit('investments', 'create'), investmentController.create)
+router.delete('/investments/:id', permit('investments', 'delete'), investmentController.remove)
+router.post('/investments/:id/restore', permit('investments', 'delete'), investmentController.restore)
+router.delete('/investments/:id/purge', permit('investments', 'purge'), investmentController.purge)
 
 // Ombordan omborga ko'chirish
 router.get('/transfers', permit('transfers'), transferController.list)

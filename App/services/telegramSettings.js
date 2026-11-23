@@ -7,7 +7,9 @@
  *  client    - mijozlar boti: internet magazin (/shop)
  *  employee  - xodimlar boti: agentlar uchun zakaz oynasi (/agent)
  */
-const { Setting } = require('../../models');
+const { Setting, User } = require('../../models');
+const { Op } = require('sequelize');
+const { currentOrg } = require('../../database/tenant');
 
 const KEY = 'telegram';
 
@@ -69,6 +71,22 @@ function validate(s) {
   }
 }
 
+/** Bot tokeni boshqa tashkilotda ishlatilayotgan bo'lsa saqlanmaydi (bitta botni ikki joy polling qila olmaydi) */
+async function assertTokensFree(next) {
+  const mine = [next.client.token, next.employee.token].filter(Boolean);
+  if (!mine.length) return;
+  const org = currentOrg();
+  const rows = await Setting.findAll({ where: { key: KEY }, skipTenant: true });
+  for (const row of rows) {
+    if (row.organizationId === org) continue;
+    const v = row.value || {};
+    const used = [v.client && v.client.token, v.employee && v.employee.token].filter(Boolean);
+    if (mine.some((t) => used.includes(t))) {
+      throw Object.assign(new Error('Bu bot boshqa tashkilotda ulangan. Boshqa bot yarating (@BotFather)'), { status: 409 });
+    }
+  }
+}
+
 async function get() {
   const row = await Setting.findOne({ where: { key: KEY } });
   return normalize(row ? row.value : DEFAULTS);
@@ -83,9 +101,15 @@ async function save(input = {}) {
     employee: sanitizeBot(input.employee, current.employee, DEFAULTS.employee),
   };
   validate(next);
+  await assertTokensFree(next);
   const row = await Setting.findOne({ where: { key: KEY } });
   if (row) await row.update({ value: next });
   else await Setting.create({ key: KEY, value: next });
+  // Xodimlar boti almashdi: barcha xodimlarning Telegram bog'lanishi uziladi (mini app tokenlari ham bekor bo'ladi) -
+  // yangi bot orqali login/parol bilan qayta kirishadi. Aks holda eski bot tokeni egasi ularning nomidan kira olardi.
+  if (current.employee.token !== next.employee.token) {
+    await User.update({ telegramId: null }, { where: { telegramId: { [Op.ne]: null } } });
+  }
   return next;
 }
 

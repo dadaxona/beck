@@ -13,6 +13,7 @@
  *    tanlangan valyutaga HOZIRGI kurs bo'yicha o'giriladi.
  */
 const { Setting } = require('../../models');
+const { currentOrg } = require('../../database/tenant');
 
 const KEY = 'currencies';
 const BASE = 'UZS';
@@ -20,23 +21,25 @@ const BASE = 'UZS';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
-let cache = null; // [{ code, rate }] (UZS siz)
+// Kesh har bir tashkilot uchun alohida: { orgId -> [{ code, rate }] } (UZS siz)
+const cache = new Map();
 
 async function others() {
-  if (cache) return cache;
+  const org = currentOrg();
+  if (cache.has(org)) return cache.get(org);
   const row = await Setting.findOne({ where: { key: KEY } });
-  const list = Array.isArray(row && row.value) ? row.value : [];
-  cache = list
+  const list = (Array.isArray(row && row.value) ? row.value : [])
     .filter((c) => c && typeof c.code === 'string' && c.code !== BASE && Number(c.rate) > 0)
     .map((c) => ({ code: c.code, rate: Number(c.rate) }));
-  return cache;
+  cache.set(org, list);
+  return list;
 }
 
 async function write(list) {
   const row = await Setting.findOne({ where: { key: KEY } });
   if (row) await row.update({ value: list });
   else await Setting.create({ key: KEY, value: list });
-  cache = list;
+  cache.set(currentOrg(), list);
 }
 
 /** Barcha valyutalar: birinchisi doim UZS */

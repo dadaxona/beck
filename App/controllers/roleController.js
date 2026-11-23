@@ -1,4 +1,4 @@
-const { Role, User } = require('../../models');
+const { sequelize, Role, User } = require('../../models');
 const { SECTIONS, sanitize } = require('../../config/permissions');
 
 /** Administrator bo'lmagan foydalanuvchi faqat o'zida bor ruxsatlarni bera oladi */
@@ -46,9 +46,20 @@ exports.create = async (req, res) => {
   res.status(201).json(view(role));
 };
 
+/** Administrator bo'lmagan foydalanuvchi faqat ruxsatlari o'zinikidan keng BO'LMAGAN rolni o'zgartira/o'chira oladi */
+function assertManageable(req, role) {
+  if (req.user.isAdmin) return;
+  try {
+    assertGrantable(req, sanitize(role.permissions));
+  } catch {
+    throw Object.assign(new Error("Sizdan ko'proq ruxsati bor rolni o'zgartira olmaysiz"), { status: 403 });
+  }
+}
+
 exports.update = async (req, res) => {
   const role = await Role.findByPk(req.params.id);
   if (!role) return res.status(404).json({ message: 'Rol topilmadi' });
+  assertManageable(req, role);
   if (!req.user.isAdmin && role.id === req.user.roleId) {
     return res.status(403).json({ message: "O'z rolingizni o'zgartira olmaysiz" });
   }
@@ -73,14 +84,18 @@ exports.update = async (req, res) => {
 exports.remove = async (req, res) => {
   const role = await Role.findByPk(req.params.id);
   if (!role) return res.status(404).json({ message: 'Rol topilmadi' });
+  assertManageable(req, role);
   if (!req.user.isAdmin && role.id === req.user.roleId) {
     return res.status(403).json({ message: "O'z rolingizni o'zgartira olmaysiz" });
   }
 
-  if (await User.count({ where: { roleId: role.id } })) {
-    return res.status(409).json({ message: "Rol foydalanuvchilarga biriktirilgan, o'chirib bo'lmaydi" });
-  }
-
-  await role.destroy();
+  // Tekshirish va o'chirish bitta tranzaksiyada (rol qulflanadi): shu paytda boshqa so'rov rolni biriktira olmaydi
+  await sequelize.transaction(async (t) => {
+    await Role.findByPk(role.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (await User.count({ where: { roleId: role.id }, transaction: t })) {
+      throw Object.assign(new Error("Rol foydalanuvchilarga biriktirilgan, o'chirib bo'lmaydi"), { status: 409 });
+    }
+    await role.destroy({ transaction: t });
+  });
   res.json({ ok: true });
 };

@@ -9,6 +9,7 @@
  * ostida jami, chegirma (bo'lsa), qarz (bo'lsa) va boshqa yoqilgan qismlar chiqadi.
  */
 const { Setting } = require('../../models');
+const images = require('./productImages');
 
 const KEY = 'a4';
 
@@ -95,8 +96,9 @@ async function get() {
 }
 
 async function save(input) {
-  if (input && typeof input.logo === 'string' && input.logo.length > LOGO_MAX) {
-    throw Object.assign(new Error('Logo rasmi juda katta (1 MB gacha)'), { status: 400 });
+  // Logotip ham 200 KB dan oshmaydi (kichigi o'zgarishsiz, kattasi sharp bilan siqiladi)
+  if (input && typeof input.logo === 'string' && input.logo) {
+    input = { ...input, logo: await images.fitDataUrl(input.logo) };
   }
   const value = sanitize(input);
   const row = await Setting.findOne({ where: { key: KEY } });

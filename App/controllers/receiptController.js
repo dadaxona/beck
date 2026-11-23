@@ -10,6 +10,7 @@ const {
   CashDesk,
   CashDocument,
 } = require('../../models');
+const numbering = require('../services/numbering');
 const currencies = require('../services/currencies');
 const { assertNonNegative } = require('../services/cashbook');
 const { today } = require('../utils/date');
@@ -146,7 +147,7 @@ async function syncPayment(doc, t, userId) {
       },
       { transaction: t },
     );
-    await cash.update({ number: `${type === 'income' ? 'KK' : 'KC'}-${cash.id}` }, { transaction: t });
+    await cash.update({ number: `${type === 'income' ? 'KK' : 'KC'}-${await numbering.next('CashDocument', t)}` }, { transaction: t });
     cashDocumentId = cash.id;
     pairs.push({ deskId: doc.cashDeskId, currency: doc.currency });
   }
@@ -253,7 +254,6 @@ async function save(req, res, existing) {
       await doc.update({ ...data, number: b.number || doc.number }, { transaction: t });
     } else {
       doc = await Receipt.create({ ...data, type, number: b.number || '', userId: req.user.id }, { transaction: t });
-      if (!doc.number) await doc.update({ number: `${PREFIX[type]}-${doc.id}` }, { transaction: t });
     }
 
     await ReceiptItem.bulkCreate(items.map((i) => ({ ...i, receiptId: doc.id })), { transaction: t });
@@ -265,6 +265,8 @@ async function save(req, res, existing) {
     if (type === 'receipt') {
       await syncPrices([...oldItems, ...items].map((i) => i.productId), t, oldItems);
     }
+    // Raqam oxirida: qulflar tartibi hamma joyda bir xil (qoldiq/narx -> raqam hisoblagichi) - PG/MySQL da deadlock bo'lmasin
+    if (!doc.number) await doc.update({ number: `${PREFIX[type]}-${await numbering.next('Receipt', t)}` }, { transaction: t });
     await syncPayment(doc, t, req.user.id);
 
     return doc.id;

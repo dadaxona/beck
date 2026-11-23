@@ -1,4 +1,5 @@
 const { Op } = require('sequelize');
+const numbering = require('../services/numbering');
 const {
   sequelize,
   Sale,
@@ -185,7 +186,7 @@ async function save(req, existing) {
       await doc.update({ ...data, number: b.number || doc.number }, { transaction: t });
     } else {
       doc = await SaleReturn.create({ ...data, number: b.number || '', userId: req.user.id }, { transaction: t });
-      if (!doc.number) await doc.update({ number: `VZ-${doc.id}` }, { transaction: t });
+      if (!doc.number) await doc.update({ number: `VZ-${await numbering.next('SaleReturn', t)}` }, { transaction: t });
     }
 
     await SaleReturnItem.bulkCreate(lines.map((l) => ({ ...l, saleReturnId: doc.id })), { transaction: t });
