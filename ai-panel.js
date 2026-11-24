@@ -47,6 +47,17 @@ const PROVIDERS = {
     inside: inside(String.raw`deepseek\.com`),
     editor: ['textarea#chat-input', 'textarea', 'div[contenteditable="true"]'],
   },
+  grok: {
+    url: 'https://grok.com/',
+    // X (Twitter) akkaunti bilan kirish ham panel ichida
+    inside: inside(String.raw`grok\.com|x\.ai|x\.com|twitter\.com|twimg\.com`),
+    editor: ['textarea[aria-label]', 'div.ProseMirror[contenteditable="true"]', 'div[contenteditable="true"]', 'textarea'],
+  },
+  qwen: {
+    url: 'https://chat.qwen.ai/',
+    inside: inside(String.raw`qwen\.ai|qwenlm\.ai|alibabacloud\.com|aliyun\.com|github\.com`),
+    editor: ['textarea#chat-input', 'textarea', 'div[contenteditable="true"]'],
+  },
   kimi: {
     // kimi.ai - xalqaro versiya (Google bilan kirish). kimi.com - Xitoy telefon raqami / WeChat bilan
     url: 'https://www.kimi.ai/',
@@ -109,16 +120,24 @@ function ensureView(id) {
   //  - saytning o'z sahifasi (masalan "kimi.ai ga o'ting") - panelning o'zida ochiladi;
   //  - boshqa havolalar - oddiy brauzerda.
   wc.on('did-create-window', (child) => {
+    // Login oynasi ham faqat shu AI va kirish (Google va h.k.) saytlarida yuradi
+    child.webContents.on('will-navigate', (event, url) => {
+      if (p.inside.test(url)) return;
+      event.preventDefault();
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    });
     child.once('closed', () => {
       if (!wc.isDestroyed()) wc.reload();
     });
   });
   wc.setWindowOpenHandler(({ url }) => {
-    if (p.inside.test(url) && !LOGIN_POPUP.test(url)) {
+    // Ko'p saytlar (DeepSeek va b.) "Google bilan kirish" oynasini avval bo'sh (about:blank) ochib, keyin Google ga yo'naltiradi
+    const blank = !url || url === 'about:blank';
+    if (p.inside.test(url) && !LOGIN_POPUP.test(url) && !blank) {
       wc.loadURL(url);
       return { action: 'deny' };
     }
-    if (p.inside.test(url)) {
+    if (blank || p.inside.test(url)) {
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
