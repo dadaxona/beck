@@ -159,6 +159,10 @@ exports.create = async (req, res) => {
   const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || '')) ? String(b.dueDate) : null;
   if (dueDate && dueDate < today()) throw fail(400, "Qarz muddati bugundan oldin bo'lishi mumkin emas");
 
+  // Sotuv sanasi (sotuv oynasida tanlanadi): YYYY-MM-DD, standart - bugun. Kelajak sanasi mumkin emas
+  const saleDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? String(b.date) : today();
+  if (saleDate > today()) throw fail(400, "Sotuv sanasi bugundan keyin bo'lishi mumkin emas");
+
   let soldOrder = null;
   const id = await sequelize.transaction(async (t) => {
     const products = await Product.findAll({ where: { id: items.map((i) => i.productId) }, transaction: t });
@@ -242,7 +246,7 @@ exports.create = async (req, res) => {
         onCredit: isBasket,
         paidAmount: isBasket ? paid : total,
         dueDate: isBasket ? dueDate : null,
-        date: today(),
+        date: saleDate,
         currency,
         priceType: b.priceType === 'wholesale' ? 'wholesale' : 'retail',
         markupType,
