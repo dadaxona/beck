@@ -56,7 +56,8 @@ const PROVIDERS = {
 };
 
 const MAX_PROMPT = 20000;
-const MAX_CSV = 5 * 1024 * 1024;
+const MAX_CSV = 20 * 1024 * 1024; // barcha fayllar jami
+const MAX_FILES = 10; // AI xizmatlari bitta xabarga odatda ~10 tagacha fayl qabul qiladi
 
 let win = null; // Dokon oynasi
 const views = new Map(); // id -> WebContentsView (bir marta yaratiladi, sessiya saqlanadi)
@@ -80,9 +81,9 @@ const focusEditor = (p) => `(() => { const el = ${editorExpr(p)}; if (!el) retur
  *  - 'input': saytning o'z "fayl yuklash" maydoni orqali (xuddi 📎 bosib fayl tanlagandek).
  *    Maydon topilmasa - 'paste' ga o'tiladi.
  */
-const attachFile = (p, name, content) => `(() => { const el = ${editorExpr(p)}; if (!el) return 'no-editor';
-  const file = new File([${JSON.stringify('﻿' + content)}], ${JSON.stringify(name)}, { type: 'text/csv' });
-  const dt = new DataTransfer(); dt.items.add(file);
+const attachFile = (p, files) => `(() => { const el = ${editorExpr(p)}; if (!el) return 'no-editor';
+  const dt = new DataTransfer();
+  for (const f of ${JSON.stringify(files)}) dt.items.add(new File(['\\uFEFF' + f.csv], f.name, { type: 'text/csv' }));
   if (${JSON.stringify(p.attach || 'paste')} === 'input') {
     const inp = ${(p.fileInput || ['input[type="file"]']).map((s) => `document.querySelector(${JSON.stringify(s)})`).join(' || ')};
     if (inp) {
@@ -166,15 +167,15 @@ function hide() {
   shown = null;
 }
 
-async function attach(id, { prompt, fileName, csv }) {
+async function attach(id, { prompt, files }) {
   const view = views.get(id);
   const p = PROVIDERS[id];
   if (!view) return { ok: false, reason: 'AI paneli ochilmagan' };
   const run = (code) => view.webContents.executeJavaScriptInIsolatedWorld(1002, [{ code }]); // AI skriptlaridan ajratilgan dunyo
   const question = await run(readEditor(p)).catch(() => null);
   if (question === null) return { ok: false, reason: 'Chat maydoni topilmadi: avval akkauntingiz bilan kiring (yoki sahifa yuklanishini kuting).' };
-  if (csv) {
-    const r = await run(attachFile(p, fileName, csv)).catch(() => 'error');
+  if (files.length) {
+    const r = await run(attachFile(p, files)).catch(() => 'error');
     if (r !== 'ok') return { ok: false, reason: "Faylni biriktirib bo'lmadi" };
   }
   // Maxsus prompt + foydalanuvchi chatga yozgan savol (bo'lsa)
@@ -208,11 +209,15 @@ function setupAiPanel({ trusted }) {
   ipcMain.handle('ai:attach', async (event, id, data) => {
     if (!fromApp(event)) return { ok: false, reason: "Ruxsat yo'q" };
     if (!known(id)) return { ok: false, reason: "Noma'lum AI" };
+    // Bitta fayl ({ fileName, csv }) yoki bir nechta fayl ({ files: [{ name, csv }] })
     const { prompt, fileName, csv } = data || {};
     if (typeof prompt !== 'string' || !prompt.trim()) return { ok: false, reason: "Prompt bo'sh" };
-    if (csv != null && (typeof csv !== 'string' || csv.length > MAX_CSV)) return { ok: false, reason: "Ma'lumot juda katta (5 MB dan ortiq)" };
-    const safeName = String(fileName || 'dokon.csv').replace(/[^\w.\-]/g, '_').slice(0, 80);
-    return attach(id, { prompt: prompt.slice(0, MAX_PROMPT), fileName: safeName, csv: csv || '' });
+    const list = Array.isArray(data?.files) ? data.files : csv ? [{ name: fileName, csv }] : [];
+    if (list.length > MAX_FILES) return { ok: false, reason: `Fayllar juda ko'p (${MAX_FILES} tadan ortiq)` };
+    if (list.some((f) => !f || typeof f.csv !== 'string')) return { ok: false, reason: "Ma'lumot noto'g'ri" };
+    if (list.reduce((t, f) => t + f.csv.length, 0) > MAX_CSV) return { ok: false, reason: "Ma'lumot juda katta (20 MB dan ortiq)" };
+    const files = list.map((f) => ({ name: String(f.name || 'dokon.csv').replace(/[^\w.\-]/g, '_').slice(0, 80), csv: f.csv }));
+    return attach(id, { prompt: prompt.slice(0, MAX_PROMPT), files });
   });
 }
 

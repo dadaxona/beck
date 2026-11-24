@@ -84,3 +84,17 @@ exports.debtors = async (req, res) => {
     },
   });
 };
+
+// To'liq biznes tahlili (AI yordamchi): ?currency=UZS&from=YYYY-MM-DD&to=YYYY-MM-DD
+// Barcha bo'limlar ma'lumoti mavzular bo'yicha fayllarga (bo'limlar - jadvallar) yig'iladi. Ruxsat: Moliya hisoboti
+const businessExport = require('../services/businessExport');
+exports.businessExport = async (req, res) => {
+  const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+  res.json(
+    await businessExport.buildExport({
+      currency: String(req.query.currency || 'UZS').slice(0, 10),
+      from: date(req.query.from),
+      to: date(req.query.to),
+    }),
+  );
+};

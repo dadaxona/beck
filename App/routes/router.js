@@ -170,6 +170,8 @@ router.get('/reports/reconciliation', permit('reconciliation'), reportController
 router.get('/reports/debtors', permit('debtors'), reportController.debtors)
 router.get('/reports/finance', permit('finance'), reportController.finance)
 router.get('/reports/dashboard', permit('dashboard'), reportController.dashboard)
+// AI yordamchi: to'liq biznes tahlili uchun barcha bo'limlar ma'lumoti (faqat Moliya hisoboti ruxsati bilan)
+router.get('/reports/business-export', permit('finance'), reportController.businessExport)
 
 // Sozlamalar: foydalanuvchilar va rollar
 router.get('/users', permit('settings', 'view'), userController.list)
